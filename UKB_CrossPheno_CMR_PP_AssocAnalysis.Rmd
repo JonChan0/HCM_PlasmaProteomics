@@ -1,0 +1,711 @@
+---
+title: "UKB CMR x Plasma Proteins Cross-Phenotype Analysis"
+author: "Jonathan Chan"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(viridis)
+library(ggsignif)
+library(car)
+library(reshape2)
+rm(list=ls())
+
+#Setting theme for ggplot to classic - You can change your plot text font and size here
+theme_set(
+  theme_classic()
+  + theme(text = element_text(family = 'sans', size=14))
+  ) 
+```
+
+This notebook looks at cross-trait associations within HCMR, evaluating them using multivariate linear regression of both joint and marginal models to correct for confounders such as age;sex; BMI and BSA (where necessary).
+Specifically, it looks at the associations between CMR measures and plasma protein levels.
+
+
+# Import
+
+```{r import_cmr}
+ukb_cases <- read_tsv('DATA/UKB/RAP/ukb_rap_HCM_20240209.csv') %>%
+  dplyr::rename(ID=1)
+
+ukb_20240209_baseline_cmr <- read_tsv('../../HCM_IntScore/ukb_sets/rap/cohort_tsvs/2024_02_09_CMR_PPsubset/20240209_age_sex_bmi_CMR_PPsubset.tsv') %>%
+  filter(if_any(`LV longitudinal strain global | Instance 2`:`LV cardiac output | Instance 3`, ~!is.na(.))) %>% #Returns 39,414 who have a non-NA value in any of the CMR measures
+  select(-`Body mass index (BMI) | Instance 0`,-`Body mass index (BMI) | Instance 1`) %>% #Only instances 2 and 3 correspond to the BMI at imaging visit
+  dplyr::rename(ID=`Participant ID`) %>%
+  mutate(hcm=ifelse(ID %in% ukb_cases$ID, T, F)) 
+
+#Check if any individual has non-NA values in Instance 3
+test <- map(ukb_20240209_baseline_cmr, ~sum(!is.na(.)))
+names(test) <- colnames(ukb_20240209_baseline_cmr)
+
+ukb_20240209_baseline_cmr <- ukb_20240209_baseline_cmr %>%
+  select(-any_of(contains('Instance 3'))) %>% #Due to lack of non-NA values in CMR measures for instance 3, remove these individuals
+  rename_with(.cols=contains('Instance 2'), .fn=~str_match(.,'([^|]+) |')[,2])
+colnames(ukb_20240209_baseline_cmr) <- c('ID','Age','Sex','BMI','BSA','lvs_ellmean','lvs_eccmean','LVEF','meanLVWT','LVM','lvs_errmean','LVSV','CO','hcm')
+
+rm(test)
+
+```
+
+```{r import_pp}
+ukb_20240209_pp_i0 <- read_tsv('DATA/UKB/RAP/ukb_allpp_i0.tsv')%>%
+  select(-`...1`) %>%
+  select(contains('instance_0')) %>% #It contains some instance 2 columns for some reason
+  rename_with(~str_match(.,'\\.(.+)')[,2]) %>%
+  filter(if_any(!'eid', ~!is.na(.))) %>%
+  mutate(non_na_count = rowSums(!is.na(.))-1) %>% #-1 for eid is non-NA
+  #filter(non_na_count > 2) %>%
+  mutate(instance=0)
+
+```
+
+```{r import_geneticpcs}
+#Import in basic covariates
+ukb_20240209_snptest_covariates <- read_tsv('../../EDA_HCMR/popgen/2_gwas/data/ukb/2024_02_09_AllUKB_Age_Sex_Height_Weight_10PCs.tsv') %>%
+  dplyr::rename(ID=`Participant ID`) %>%
+  filter(ID %in% ukb_20240209_pp_i0$eid,
+         ID %in% ukb_20240209_baseline_cmr$ID)
+
+colnames(ukb_20240209_snptest_covariates)[2:3] <- c('age','sex')
+colnames(ukb_20240209_snptest_covariates)[12:21] <- str_c('pc',rep(1:10))
+```
+
+Merge the CMR and the PP datasets and filter out the HCM cases.
+
+```{r merge}
+
+ukb_20240209_baseline_cmr_pp <- full_join(select(ukb_20240209_baseline_cmr,-hcm),ukb_20240209_pp_i0, by=c('ID'='eid')) %>%
+  filter(if_any('lvs_ellmean':'CO',~!is.na(.)),
+         non_na_count >= 1)%>%
+  mutate(hcm=ifelse(ID %in% ukb_cases$ID, T, F))  #5293 individuals with both CMR and Plasma Protein information (any pp)
+
+#Add the genetic PCs as covariates to the merged tibble
+ukb_20240209_baseline_cmr_pp <- left_join(ukb_20240209_baseline_cmr_pp,select(ukb_20240209_snptest_covariates,ID,pc1:pc10), by='ID') %>%
+  filter(if_any(pc1:pc10, ~!is.na(.)))%>% #5242 individuals who also have genetic PCs data
+  filter(!is.na(Age), !is.na(Sex), !is.na(BMI) ) #150 individuals lost due to NA values in BMI -> 5092 individuals
+
+rm(ukb_20240209_baseline_cmr,ukb_cases, ukb_20240209_pp_i0, ukb_20240209_snptest_covariates)
+
+#Query for HCM cases
+print(str_c('There are ',nrow(filter(ukb_20240209_baseline_cmr_pp, hcm==T)),' HCM cases in this intersection between CMR and PP in UKB'))
+
+ukb_20240209_baseline_cmr_pp_excludeHCM <- filter(ukb_20240209_baseline_cmr_pp, hcm==F) 
+rm(ukb_20240209_baseline_cmr_pp)
+
+#This adds in extra columns that I would like e.g LVMASSI
+ukb_20240209_baseline_cmr_pp_excludeHCM <- ukb_20240209_baseline_cmr_pp_excludeHCM %>%
+  mutate('LVMI' = LVM / BSA,
+         'LVSVI' = LVSV / BSA,
+         'CI' = CO/ BSA) %>%
+  mutate(lvs_ellmean=-lvs_ellmean,
+         lvs_eccmean=-lvs_eccmean) %>%
+    select(-c(LVM,LVSV,CO))
+```
+
+Filter for your plasma proteins of interest e.g those shared with HCMR as well as those discovered by DPE case-control analysis in UKB.
+
+```{r pp_filtering}
+pp <- c('NTproBNP','MMP1','IL1RL1','LGALS3',
+        'TNNI3','NPPB','HRC','EDN1','ACE2',
+        'APOM','F7')
+
+ukb_20240209_baseline_cmr_pp_excludeHCM <- ukb_20240209_baseline_cmr_pp_excludeHCM %>%
+  select(ID:BSA,pc1:pc5,hcm,lvs_ellmean:lvs_errmean,LVMI:CI,str_to_lower(pp)) #Also only keep 5 PCs
+```
+
+
+# EDA
+
+This performs distribution visualisation and normalisation of variables if necessary.
+
+## Distribution Visualisation
+
+```{r}
+single_col_dist_plotter <- function(data, varname, plot_type='Standard', log=FALSE, withsumm=FALSE, subset='ukb_cmr_pp', save=T,ks_test=T,wrap_length=80){ #where column is in integer form i.e col_number
+  
+  plot_data <- data
+  xlabel <- varname
+  
+  if (isTRUE(withsumm)){
+      writeLines(str_c('Performing summary and histqq plotting function on',xlabel, 'continuous variable', sep=' '))
+    print(kable(summary(plot_data),cpt=str_c('Summary Statistics for', xlabel, 'Phenotype')))
+  } else {
+      writeLines(str_c('Performing histogram and qqplot plotting function on',xlabel, 'continuous variable', sep=' '))
+  }
+  
+  #Renaming the column heading to pheno for plotting
+  plot_data <- as_tibble_col(plot_data,column_name='pheno')
+  #print(plot_data)
+  
+  output_hist <- invisible(ggplot(plot_data)+
+    geom_histogram(aes(x=pheno), bins = 30)+ #Plot histogram with 30 bins
+    ylab('Count')+
+    xlab(case_when(log==FALSE && plot_type !='Rank-Based Inverse Normal Transformed'  ~xlabel, 
+                   log ==TRUE ~ str_c('ln(', xlabel,')'), 
+                   plot_type=='Rank-Based Inverse Normal Transformed' ~ str_c('z-score for ', xlabel)))+ #Plot log as xlabel is log plot
+    labs(title=str_wrap(str_c(plot_type,'Histogram of', xlabel, 'in HCMR', sep=' '),width=wrap_length),
+         subtitle = str_c('n =', sum(!is.na(plot_data[1])), 'and number of NA =', sum(is.na(plot_data[1])), sep= ' ')))
+  
+  output_qq <- invisible(ggplot(plot_data, aes(sample=pheno))+
+    geom_qq()+
+    geom_qq_line(col='red')+
+    xlab('Standard Normal Quantiles')+
+    ylab('Observed Quantiles')+
+    labs(title=str_wrap(str_c(plot_type,'QQ-plot of', xlabel, 'in UKB', sep=' '),width=wrap_length),
+         subtitle = str_c('n =', sum(!is.na(plot_data[1])), 'and number of NA =', sum(is.na(plot_data[1])), sep= ' ')))
+  
+    if(isTRUE(ks_test)){
+    ks <- ks.test(plot_data$pheno, pnorm) #Null hypothesis is that the pheno is drawn from the same distribution as the normal distribution
+    output_hist <- output_hist+
+      labs(caption=str_c('K-S test for normality p-value= ', signif(ks$p.value, 3)))
+    
+    output_qq <- output_qq+
+      labs(caption=str_c('K-S test for normality p-value= ', signif(ks$p.value, 3)))
+  }
+  
+  #Merging the two plots into one plot
+  output_histqq<- ggpubr::ggarrange(output_hist,output_qq, ncol=2)
+  
+  print(output_histqq)
+  
+  if (isTRUE(save)){
+    invisible(ggsave(str_c('PLOTS/UKB/0_EDA/1_CMR_PP_DISTRIBUTIONS/',subset, '_',varname,'_',plot_type,'_histqq.png'), output_histqq, dpi=600, width=18, height=6))
+  }
+  
+
+}
+
+```
+
+Run the distribution visualisation for continuous variables.
+
+```{r}
+walk2(select(ukb_20240209_baseline_cmr_pp_excludeHCM,-'ID',-'Sex',-'hcm',-'pc1',-'pc2',-'pc3',-'pc4',-'pc5'), #Ignore the discrete variables
+      colnames(select(ukb_20240209_baseline_cmr_pp_excludeHCM,-'ID',-'Sex',-'hcm',-'pc1',-'pc2',-'pc3',-'pc4',-'pc5')),
+      ~single_col_dist_plotter(.x,.y))
+
+```
+
+## Normalisation
+Normalisation of the plasma proteins via rank-based inverse normalisation.
+
+```{r}
+inverse_rank_transformer <- function(data,columns){ #Columns are a vector of characters
+  
+  for (i in columns){
+    col_label <- i
+    col_label_before <- columns[match(i,columns)-1]
+    mask <- !is.na(data[[i]]) #Mask to filter out NA values
+                             
+    # Filter out NA values for that phenotype
+    data_copy <- subset(data, mask)
+    data_copy[[i]] <- RNOmni::RankNorm(data_copy[[i]]) #Performing rank-inverse normalisation
+    data_copy <- select(data_copy, 'ID',all_of(i)) #Taking only the column with SitePatID and the column of interest
+    
+    data <- select(data, - i) %>% #Removing the original column and adding back the new column after rank-inverse normalisation
+      left_join(data_copy, by='ID') %>%
+      relocate(i, .after=!!col_label_before) #Moving the appended column back to its original index
+    
+    hist(data[[i]], main=i,xlab=i)
+  }
+  return(data)
+}
+
+rank_transform_columns <- str_to_lower(pp)
+rank_transformed_tb <- inverse_rank_transformer(ukb_20240209_baseline_cmr_pp_excludeHCM, rank_transform_columns)
+
+#Merge back everything together
+ukb_20240209_baseline_cmr_pp_excludeHCM <- select(ukb_20240209_baseline_cmr_pp_excludeHCM, colnames(ukb_20240209_baseline_cmr_pp_excludeHCM)[!colnames(ukb_20240209_baseline_cmr_pp_excludeHCM) %in% c(rank_transform_columns)]) %>%
+  bind_cols(select(rank_transformed_tb, rank_transform_columns))
+
+rm(rank_transformed_tb)
+```
+
+
+# CMR x PP Cross-Phenotype Analysis
+
+```{r definition_groups}
+#Define the groups of variables used
+func <- c('LVEF','lvs_ellmean','lvs_eccmean','lvs_errmean'
+          #,'CI'
+          )
+hty <- c('LVMI', 'meanLVWT')
+
+func_label <- c('LV ejection fraction','-LV longitudinal strain global','-LV circumferential strain global','LV radial strain global'
+                #,'LV cardiac index'
+                )
+hty_label <- c('LV myocardial mass index','LV mean myocardial wall thickness global')
+
+xlabel_tb <- as_tibble(c(str_to_lower(pp),func,hty)) %>%
+  dplyr::rename('Variable'=value) %>%
+  mutate(group = case_when(Variable %in% str_to_lower(pp) ~ 'pp',
+                           Variable %in% func ~ 'func',
+                           Variable %in% hty  ~ 'hty'),
+         Palette = case_when(Variable %in% str_to_lower(pp) ~ '#1b9e77',
+                           Variable %in% func ~ '#d95f02',
+                           Variable %in% hty  ~ '#7570b3'))
+xlabel_tb$Label <- c(pp,func_label, hty_label)
+
+```
+
+## Correlation Measures
+
+This first evaluates both Pearson's P and Spearman's Rho correlation coefficient on each pair across eaech of the different definition groups.
+
+```{r pairwise_correlation}
+pairwise_correlation_matrix <- function(data, columns, output_name,x_dim, y_dim, cor_type='pearson', xlabel_tb, colour = T){ #Columns are integer indices btw of data tb; x_dim and y_dim refer to the .png size in inches
+  
+  cor_matrix <- data %>%
+    select(all_of(columns))
+  
+  col_labels <- colnames(data)[columns]
+  
+  cor_values <- cor(cor_matrix, use='pairwise.complete.obs', method=cor_type)
+  
+
+  #Reorders the correlation matrix via hierarchial clustering to group similar correlation coefficients together
+  cor_distance <- as.dist((1-cor_values)/2)
+  hier_cluster <- hclust(cor_distance)
+  cor_values <- cor_values[hier_cluster$order, hier_cluster$order]
+  
+  cor_values[upper.tri(cor_values)] <- NA #Only taking one half of the correlation matrix given its reflection
+  cor_values <- melt(cor_values)%>%
+    filter(!is.na(value))
+  
+  #Adding the labels for both X and Y axes of the correlation matrix, and adding groups to enable colouring
+  
+  #print(cor_values)
+  
+  xlabel_tb_label <- xlabel_tb %>%
+    select(Variable,Label)
+  cor_values_labels <- cor_values %>%
+    left_join(xlabel_tb_label, by=c('Var1'='Variable'))
+    
+  if (isTRUE(colour)){
+    xlabel_tb_groups <- xlabel_tb %>%
+      select(Variable,group, Palette)
+  
+    cor_values_labels <- cor_values_labels %>%
+      left_join(xlabel_tb_groups, by=c('Var1'='Variable'))
+  }
+    
+  pairwise_cor_plot <- ggplot(cor_values, aes(Var1, Var2, fill=value))+
+    geom_tile(lwd=0.5, show.legend = TRUE)+
+    scale_fill_viridis(limits=c(-1,1), name='Correlation Coefficient')+
+    scale_x_discrete(label=cor_values_labels$Label)+
+    scale_y_discrete(label=cor_values_labels$Label)+
+    
+    labs(title=str_wrap(str_c('Pairwise',cor_type,'correlation coefficients between', output_name,sep=' '), width=65), caption='Hierarchial clustering applied to group associated variables'
+         ) +
+    guides(fill = guide_colourbar(barheight = 5, barwidth = 1, title.position='top', title.hjust=0.5))+
+    coord_fixed()+
+    theme(axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank(),
+          axis.ticks = element_blank(),
+          legend.direction='vertical',
+          axis.title=element_text(size=24),
+          axis.text.x=element_text(angle=90),
+          text = element_text(size = 14))
+          
+    if (isTRUE(colour)){
+      pairwise_cor_plot <- pairwise_cor_plot +
+        theme(axis.text.x=element_text(colour = cor_values_labels$Palette),
+              axis.text.y=element_text(colour = cor_values_labels$Palette))
+    }
+
+  
+  print(pairwise_cor_plot)
+  
+  if(length(col_labels) <= 20){
+    
+    pairwise_cor_plot_ggsave <- pairwise_cor_plot +
+      geom_text(aes(label=round(value,3)), colour = 'black')+
+      theme(axis.text =element_text(size=18))
+  } else {
+    pairwise_cor_plot_ggsave <- pairwise_cor_plot
+  }
+
+      
+  ggsave(str_c('PLOTS/UKB/0_EDA/2_PAIRWISE_CORRELATION/',cor_type,'_',output_name,'.png'), pairwise_cor_plot_ggsave, width = x_dim, height = y_dim, dpi=600)
+
+  
+  #Also including a gplots version of this heatmap with dendrogram shown
+  # gplots_version <- gplots::heatmap.2(cor_values,
+  #                                     trace='none',
+  #                                     density.info='none',
+  #                                     Colv=as.dendrogram(hier_cluster))
+  # print(gplots_version)
+  
+  return(cor_values)
+}
+```
+
+Run the pairwise correlation matrix
+
+```{r}
+pearson <- pairwise_correlation_matrix(select(ukb_20240209_baseline_cmr_pp_excludeHCM,all_of(xlabel_tb$Variable)),
+                                       seq(ncol(select(ukb_20240209_baseline_cmr_pp_excludeHCM,all_of(xlabel_tb$Variable)))),
+                                                                                                                     'ukbcmr_pp', 15, 15, xlabel_tb=xlabel_tb)
+
+spearman <- pearson <- pairwise_correlation_matrix(select(ukb_20240209_baseline_cmr_pp_excludeHCM,all_of(xlabel_tb$Variable)),
+                                       seq(ncol(select(ukb_20240209_baseline_cmr_pp_excludeHCM,all_of(xlabel_tb$Variable)))),
+                                                                                                                     'ukbcmr_pp',cor_type='spearman', 15, 15, xlabel_tb=xlabel_tb)
+rm(pearson, spearman)
+```
+
+## Multivariate Regression Analysis
+
+This performs multivariate linear regression (for continuous phenotypes) against the phenotype of interest + covariates of age/sex/BMI/BSA (if non-indexed).
+You have to be careful about linear regression assumptions as well so I by default apply inverse-rank based normalisation to the response variable.
+
+```{r multivariate_assessor_function}
+
+multivariate_assessor <- function(input_tb, response_var, predictor_vars, covars=c('Age','Sex','BMI','pc1','pc2','pc3','pc4','pc5'),cont_or_discrete_response='cont', model_return=F, summary_print=T, ivnormalise=T){
+  
+  formula <- str_c(response_var, '~',
+                   str_c(covars, collapse='+'),'+',
+                   str_c(predictor_vars,collapse='+'))
+  
+  input_tb <- filter(input_tb, !is.na(!!sym(response_var))) #Exclude rows with NA values in the response variable
+  
+  if(isTRUE(ivnormalise)){
+    input_tb[[response_var]] <- RNOmni::RankNorm(input_tb[[response_var]])
+  }
+  
+  if(cont_or_discrete_response=='cont'){
+    model <- lm(formula, data=input_tb)
+  } else if (cont_or_discrete_response=='discrete'){
+    model <- glm(formula,data=input_tb, family='binomial' )
+  }
+  
+   if(isTRUE(summary_print)){
+      print(str_c('Phenotype',response_var, 'tested for association with', str_c(predictor_vars, collapse=', '),sep=' '))
+      print(summary(model))
+   }
+  
+  #Check for multicollinearity (using variance inflation factor)
+  if(sum(vif(model)>5)>=1){ #If any of the coefficients have VIF greater than 5
+    print('Variance inflation factor >5 detected in the model suggests multicollinearity')
+    stop()
+  }
+  
+  pvals <- summary(model)$coefficients
+  adjusted_rsq <- summary(model)$adj.r.squared
+  
+  if(predictor_vars == 'hcm'){ #i.e a discrete predictor
+    predictor_vars <- 'hcmTRUE'
+  }
+  
+  output_tb <- as_tibble(pvals) %>%
+    bind_cols('Predictor'=rownames(pvals)) %>%
+    mutate('Pheno'=response_var) %>%
+    select(Pheno,Predictor, everything()) %>%
+    filter(Predictor %in% predictor_vars) 
+  colnames(output_tb) <- c('Pheno','Predictor','Estimate','SE','tvalue','pval')
+  
+  output_tb <- output_tb %>% 
+    mutate(upperSE = Estimate + SE,
+           lowerSE = Estimate - SE) %>%
+    select(-tvalue)
+  
+  if (isTRUE(model_return)){
+    return(model)
+  } else{
+    return(output_tb)
+  }
+}
+```
+
+```{r summary_plotter}
+
+summary_plotter <- function(input_tb,output_label, output_path='PLOTS/UKB/2_CMR_vs_PP_Summary/', pval='bonferroni',confint=F, se=F,test='t-Test', xlabel='Change in Phenotype per Unit Increase in Predictor'){
+  
+  if(length(unique(input_tb$Predictor))>8){
+    Palette <- 'Paired'
+  } else {
+    Palette <- 'Dark2'
+  }
+  
+  if (pval=='fdr'){
+    input_tb <- input_tb %>% mutate(pval = p.adjust(pval, 'fdr'))
+    pval_threshold <- 0.05
+  }  else if (pval =='bonferroni'){
+    pval_threshold <- 0.05/nrow(input_tb)
+  }
+  
+  #Only assign a shape to the plasma protein if they reach pvalue threshold
+ 
+  summary_cont_plot <- ggplot(input_tb, aes(x=Estimate, y=-log10(pval), col=Label2, shape=Label))+
+    geom_vline(xintercept=0, linetype='dashed')+
+    geom_point()+
+    scale_colour_brewer(palette=Palette)+
+    labs(col='Plasma Protein',shape='Phenotype')+
+    scale_x_continuous(n.breaks=10)+
+    xlab(xlabel)+
+    ylab('-log10(p-value)')+
+    labs(title=str_wrap(str_c('Summary plot of ', test,' tests for ',length(unique(input_tb$Pheno)), ' phenotypes across ', length(unique(input_tb$Predictor)), ' predictors')))
+  
+  if (pval=='bonferroni'){
+    
+    summary_cont_plot <- summary_cont_plot +
+      geom_hline(yintercept=-log10(0.05/nrow(input_tb)), linetype='dashed')+
+      labs(caption=str_c('Bonferroni-corrected p-value threshold = ',signif(0.05/nrow(input_tb),3)))
+  } else if (pval =='fdr'){
+    summary_cont_plot <- summary_cont_plot +
+      geom_hline(yintercept=-log10(0.05), linetype='dashed')+
+      ylab('-log10(Adjusted p-value)')+
+      labs(caption='FDR correction applied for multiple testing burden')
+  }
+  
+  if(isTRUE(confint)){
+    summary_cont_plot <- summary_cont_plot +
+      geom_errorbar(aes(xmin=lowerCI, xmax=upperCI),alpha=0.5)
+    
+    append <- '_confint'
+  } else if(isTRUE(se)){
+      summary_cont_plot <- summary_cont_plot +
+      geom_errorbar(aes(xmin=lowerSE, xmax=upperSE),alpha=0.5)
+    
+    append <- '_SE'
+    }
+    else{
+    append <- ''
+  }
+  
+  print(summary_cont_plot)
+  ggsave(str_c(output_path,test,'_',output_label,'_summary_plot_',pval,append,'.png'),summary_cont_plot,dpi=600, width=12, height=6)
+}
+```
+
+### Marginal CMR vs. Plasma Proteins Association Analysis
+
+I also analyse each plasma protein individually via marginal models (hence CMR measure ~ age+sex+bmi+ plasma protein z).
+
+```{r marginal_cmr_vs_pp}
+#Functional ~ plasma proteins
+print('Evaluating functional ~ plasma marginally')
+func_vs_pp_combinations <- as.list(expand_grid(func,str_to_lower(pp)))
+func_vs_pp_marginal <- map2(func_vs_pp_combinations[[1]],func_vs_pp_combinations[[2]],~multivariate_assessor(ukb_20240209_baseline_cmr_pp_excludeHCM,.x,.y))%>% bind_rows()
+
+#Hypertrophy ~ plasma proteins
+print('Evaluating hypertrophy ~ plasma marginally')
+hty_vs_pp_combinations <- as.list(expand_grid(hty[-2],str_to_lower(pp))) #Exclude meanLVWT
+hty_vs_pp_marginal <- map2(hty_vs_pp_combinations[[1]],hty_vs_pp_combinations[[2]],~multivariate_assessor(ukb_20240209_baseline_cmr_pp_excludeHCM,.x,.y))%>% bind_rows()
+
+#Evaluate separately for meanLVWT due to need for BSA covariate
+wallthkmax_vs_pp_combinations <- as.list(expand_grid('meanLVWT',str_to_lower(pp)))
+wallthkmax_vs_pp_marginal <- map2(wallthkmax_vs_pp_combinations[[1]],wallthkmax_vs_pp_combinations[[2]],~multivariate_assessor(ukb_20240209_baseline_cmr_pp_excludeHCM,.x,.y,covars=c('Age','Sex','BMI','BSA','pc1','pc2','pc3','pc4','pc5')))%>% bind_rows()
+hty_vs_pp_marginal <- bind_rows(hty_vs_pp_marginal, wallthkmax_vs_pp_marginal)
+rm(wallthkmax_vs_pp_marginal)
+
+all_vs_pp_marginal <- bind_rows(func_vs_pp_marginal, hty_vs_pp_marginal) %>%
+  left_join(select(xlabel_tb,Variable,Label), by=c('Pheno'='Variable')) %>%
+  left_join(select(xlabel_tb,Variable,Label2=Label), by=c('Predictor'='Variable'))
+rm(func_vs_pp_marginal, hty_vs_pp_marginal)
+
+```
+##### Summary Plot of Marginal CMR Measures vs. Plasma Proteins
+
+```{r summary_marginal_cmr_vs_pp}
+summary_plotter(all_vs_pp_marginal,output_label='all_vs_pp_marginal',pval='fdr',se=F)
+summary_plotter(all_vs_pp_marginal,output_label='all_vs_pp_marginal',pval='fdr',se=T)
+
+summary_plotter(all_vs_pp_marginal,output_label='all_vs_pp_marginal',pval='bonferroni',se=F)
+summary_plotter(all_vs_pp_marginal,output_label='all_vs_pp_marginal',pval='bonferroni',se=T)
+```
+
+# Addendum - GWAS
+
+This details the code used to output the necessary file... .sample file for GWAS via SNPTest or REGENIE of the plasma proteins (NTproBNP etc.) from UKB samples excluding those used in the Harper et al, 2021 GWAS.
+
+```{r ukb_prep}
+#Select the pp you want to run a GWAS on
+pp <- c('NTproBNP','MMP1','IL1RL1','LGALS3',
+        'TNNI3','NPPB','HRC','EDN1','ACE2',
+        'APOM','F7')
+
+# pp <- c('FABP3','SHISA5','MAMDC2','LTBP2') #This is for part 2
+
+ukb_20240209_select_pp <- ukb_20240209_pp_i0 %>%
+  select(ID=eid,all_of(str_to_lower(pp))) %>%
+  filter(if_any(str_to_lower(pp),~!is.na(.)))
+colnames(ukb_20240209_select_pp) <- c('ID',pp)
+
+#Import in basic covariates
+covar <- read_tsv('../../EDA_HCMR/popgen/2_gwas/data/ukb/2024_02_09_AllUKB_Age_Sex_Height_Weight_10PCs.tsv') %>%
+  dplyr::rename(ID=`Participant ID`) %>%
+  filter(ID %in% ukb_20240209_select_pp$ID)
+
+colnames(covar)[2:3] <- c('age','sex')
+colnames(covar)[12:21] <- str_c('pc',rep(1:10))
+
+ukb_20240209_pp_gwas <- left_join(covar,ukb_20240209_select_pp) %>%
+  mutate(instance=0) #Instance 0 of the plasma proteins
+rm(covar, ukb_20240209_select_pp)
+
+#This function returns a tibble which only grabs one of the instance values
+instance_grabber <- function(input_tb, phenotype_of_interest, output_colname, instance_col='instance'){
+  
+  test <- input_tb %>%
+    select(ID, instance, contains(phenotype_of_interest)) %>%
+    pivot_longer(cols = starts_with(phenotype_of_interest), 
+                 names_to = 'instance_col', 
+                 names_prefix = str_c(phenotype_of_interest,'_'),
+                 values_to =output_colname) %>%
+    filter(!is.na(output_colname)) %>%
+    filter(as.numeric(str_match(instance_col,'(\\d){1,2}$')[,2]) == instance)
+  
+  instance0_colname <- str_c(phenotype_of_interest, ' | Instance 0')
+  
+  output_tb <- left_join(input_tb, test, by=c('ID','instance')) %>%
+    select(-instance_col)
+  
+  #Change the NA values of the output column to that of instance 0 (in the case that the other instance has NA values)
+  for (i in nrow(output_tb)){
+    if (is.na(output_tb[[output_colname]][i] )){
+      output_tb[[output_colname]][i] <- output_tb[[instance0_colname]][i]
+    }
+  }
+  output_tb <- output_tb %>%
+    select(-matches(phenotype_of_interest, ignore.case = F))
+  
+  return(output_tb)
+
+}
+
+ukb_20240209_pp_gwas_cleaned <- instance_grabber(instance_grabber(ukb_20240209_pp_gwas, 'Standing height', 'height'),'Weight','weight')
+rm(ukb_20240209_pp_gwas)
+
+harper_ids <- read.table('../../EDA_HCMR/popgen/2_gwas/data/hcmr_ukbb.pheno')
+#Filter out those in Andrew Harper's UKB controls
+ukb_20240209_pp_gwas_filtered <- ukb_20240209_pp_gwas_cleaned %>%
+  filter(!ID %in% harper_ids$V1)
+
+rm(harper_ids, ukb_20240209_pp_gwas_cleaned)
+
+```
+
+```{r snptest_prep}
+
+snptest_sample_prep_function <- function(input_tb, phenotypes_of_interest, output_filepath, ukb_samplefile_path, covariates=c('sex','age','height','weight',str_c('pc',seq(1,10))) ){
+
+  snptest_sample <- input_tb %>%
+    select(sample_ID=ID, all_of(covariates), all_of(phenotypes_of_interest)) %>%
+     mutate(sex=ifelse(sex=='Male', 'M', 'F')) %>%
+    mutate(across(.cols=everything(), as.character))
+  
+  ukb_sample_file <- read.table(ukb_samplefile_path, header=T) %>% #This is the original filepath for the .sample file corresponding to the .bgen file 
+    select(sample_ID=1) %>%
+    filter(sample_ID != 0) %>% #Filter out the first row which is a metadata row
+    mutate(sample_ID = as.character(sample_ID))
+  
+  snptest_sample <- left_join(ukb_sample_file, snptest_sample, by='sample_ID') %>% #This is needed to keep the correct order of rows in the sample ID as the .bgen file for UKB imputed genotypes
+    mutate(include=as.character(ifelse(sample_ID %in% input_tb$ID, T,F)))
+  
+  
+  snptest_type_row <- as_tibble(rbind(c('0','D',rep('C',length(covariates)-1), rep('P',length(phenotypes_of_interest)),'D'))) #D indicates discrete covariate; C indicates continuous covariate; P indicates continuous phenotype; B for binary phenotype of 0 or 1
+  colnames(snptest_type_row) <- colnames(snptest_sample)
+  snptest_sample <- bind_rows(snptest_type_row,snptest_sample) 
+  
+  write_delim(snptest_sample,output_filepath)
+  
+  
+  return(snptest_sample)
+
+}
+
+ukb_pp_noharper_sample <- snptest_sample_prep_function(ukb_20240209_pp_gwas_filtered,
+                                                       c('NTproBNP','MMP1','IL1RL1','LGALS3','TIMP1'),
+                                                       'popgen/2_gwas/data/ukb/ukb_pp_pheno.sample',
+                                                       'popgen/2_gwas/data/ukb/ukb11223_imp_chr22_v3_s487324.sample')
+
+```
+
+```{r regenie_prep}
+regenie_pheno_covar_prep <- function(input_tb, phenotypes_of_interest, output_filepath, ukb_samplefile_path, hcm_filter= 'hcm_remove', covariates=c('sex','age','height','weight',str_c('pc',seq(1,10))) ){
+
+  if(hcm_filter == 'hcm_remove'){
+    input_tb <- input_tb %>% filter(hcm==FALSE) #104 HCM cases to filter out
+  } else if (hcm_filter=='hcm_keep'){
+    input_tb <- input_tb
+  } else if (hcm_filter=='hcm_only'){
+    input_tb <- input_tb %>% filter(hcm==T)
+  }
+    
+  snptest_sample <- input_tb %>%
+    select(sample_ID=ID, all_of(covariates), all_of(phenotypes_of_interest)) %>%
+     mutate(sex=case_when(sex=='Male'~1,
+                          sex=='Female'~0,
+                          T~NA)) %>%
+    mutate(across(.cols=everything(), as.character))
+  
+  ukb_sample_file <- read.table(ukb_samplefile_path, header=T) %>% #This is the original filepath for the .sample file corresponding to the .bgen file 
+    select(sample_ID=1) %>%
+    filter(sample_ID != 0) %>% #Filter out the first row which is a metadata row
+    mutate(sample_ID = as.character(sample_ID))
+  
+  snptest_sample <- left_join(ukb_sample_file, snptest_sample, by='sample_ID') %>% #This is needed to keep the correct order of rows in the sample ID as the .bgen file for UKB imputed genotypes
+    mutate(include=as.character(ifelse(sample_ID %in% input_tb$ID, T,F)))
+  
+  #snptest_sample <- filter(snptest_sample, include==T)
+  
+  regenie_covar <- snptest_sample %>%
+    select(FID = sample_ID, IID=sample_ID, all_of(covariates))
+  
+  regenie_pheno<- snptest_sample %>%
+    select(FID=sample_ID, IID=sample_ID, all_of(phenotypes_of_interest))
+  
+  #Also write sample inclusion file
+  regenie_sample_inclusion <- snptest_sample %>%
+    filter(include==T) %>%
+    select(FID=sample_ID, IID=sample_ID)
+  
+  #Also write non-NA phenotype and non-NA covariate .incl file for FINEMAP/LDSTORE2
+  nonNAphenocovar <- snptest_sample %>%
+    filter(if_any(phenotypes_of_interest, ~!is.na(.))) %>%
+    filter(if_all(covariates, ~!is.na(.))) %>%
+    select(sample_ID)
+  
+  write_tsv(regenie_covar, str_c(output_filepath,'regenie_ukb_covar.tsv'))
+  write_tsv(regenie_pheno, str_c(output_filepath,'regenie_ukb_pheno.tsv'))
+  write_tsv(regenie_sample_inclusion, str_c(output_filepath, 'regenie_ukb_sampleinclusion.tsv'), col_names = F)
+  write_tsv(nonNAphenocovar, str_c(output_filepath, 'regenie_ukb_sampleinclusion_nonNAphenocovars.incl'), col_names = F)
+  
+  
+  return(list(regenie_pheno, regenie_covar))
+
+}
+
+
+#Without HCM cases
+# ukb_pp_noharper_regenie<- regenie_pheno_covar_prep(ukb_20240209_pp_gwas_filtered,
+#                                                        c('NTproBNP','MMP1','IL1RL1','LGALS3','TIMP1'),
+#                                                        'popgen/2_gwas/data/ukb/REGENIE/1_exclHCMcases',
+#                                                        'popgen/2_gwas/data/ukb/ukb11223_imp_chr22_v3_s487324.sample')
+
+#With HCM cases - this is the default
+ukb_pp_noharper_regenie_inclHCM<- regenie_pheno_covar_prep(ukb_20240209_pp_gwas_filtered,
+                                                       pp,
+                                                       '../../EDA_HCMR/popgen/2_gwas/data/ukb/REGENIE/2_inclHCMcases/',
+                                                       '../../EDA_HCMR/popgen/2_gwas/data/ukb/ukb11223_imp_chr22_v3_s487324.sample', hcm_filter='hcm_keep')
+
+#This is for part2 i.e the 4 extra pp of MAMDC2; FABP3; LTBP1; SHISA5
+# ukb_pp_noharper_regenie_inclHCM<- regenie_pheno_covar_prep(ukb_20240209_pp_gwas_filtered,
+#                                                        pp,
+#                                                        '../../EDA_HCMR/popgen/2_gwas/data/ukb/REGENIE/2_inclHCMcases/part2/',
+#                                                        '../../EDA_HCMR/popgen/2_gwas/data/ukb/ukb11223_imp_chr22_v3_s487324.sample', hcm_filter='hcm_keep')
+
+#Only HCM cases
+# ukb_pp_noharper_regenie_onlyHCMcases<- regenie_pheno_covar_prep(ukb_20240209_pp_gwas_filtered,
+#                                                        c('NTproBNP','MMP1','IL1RL1','LGALS3','TIMP1'),
+#                                                        'popgen/2_gwas/data/ukb/REGENIE/3_onlyHCMcases/',
+#                                                        'popgen/2_gwas/data/ukb/ukb11223_imp_chr22_v3_s487324.sample', hcm_filter='hcm_only')
+
+```
+
