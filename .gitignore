@@ -53,3 +53,7 @@ rsconnect/
 *.tsv
 *pdf
 *.xlsx
+*.RStudio
+*.rds
+
+OUTPUT/*
