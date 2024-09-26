@@ -27,13 +27,21 @@ This performs univariate survival analysis using categorical variables on certai
 ## Import Predictor Data
 
 ```{r}
+rcmm_cov<- T
+
 instance <- '3_TOTAL'
 # instance <- '1_I0'
 # instance <- '2_5Y'
 # instance <- '4_NEGTOTAL' #Those who are never HCM or HF patients
 
 #This is derived from `UKB_Plasma_Proteomics_Analysis.Rmd` and contains the HCM cases corresponding to the particular instance (I0; 5Y or Total)
-ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking.tsv',collapse='')) %>%
+if(isTRUE(rcmm_cov)){
+  ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv',collapse=''))
+} else {
+  ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking.tsv',collapse=''))
+}
+
+ ukb_pp_hcm_cov2 <- ukb_pp_hcm_cov2 %>%
   mutate(smoking=factor(smoking, levels=c('Never','Previous','Current')))
 
 if (instance %in% c('1_I0','2_5Y','3_TOTAL')) {
@@ -96,6 +104,14 @@ ukb_pp_hcm_outcome <- ukb_pp_hcm_outcome %>%
   rowwise() %>%
   mutate(hfcomp_age = min(c_across(c('hf_age_i50','HeartTransplant_mergeage')),na.rm=T)) %>% #Take the earliest date of any occurrence in the composite
   mutate(hfcomp_age = ifelse(hfcomp_status==T, hfcomp_age, censoring_age)) %>% #If censored i.e not event, then take the censoring age. 
+  ungroup()
+
+#For AF only outcome
+ukb_pp_hcm_outcome <- ukb_pp_hcm_outcome %>%
+  mutate(af_status = as.numeric(if_any(c('af_age_i48'), ~!is.na(.))))%>%
+  rowwise() %>%
+  mutate(af_age = af_age_i48) %>% #Take the earliest date of any occurrence in the composite
+  mutate(af_age = ifelse(af_status==T, af_age, censoring_age)) %>% #If censored i.e not event, then take the censoring age. 
   ungroup()
 
 ```
@@ -179,26 +195,32 @@ km_survival_curv_plotter <- function(input_tb, categorical_var, status, outcome_
 
 
 ```{r kaplan_meier, fig.width=9, fig.height=10, message=F, warning=F}
-outcomes_of_interest <- c('1_VA','2_HF','3_OV')
-plotpaths <- str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/1_UNIVARIATE_KM/',instance,'/', outcomes_of_interest,'/')
+outcomes_of_interest <- c('1_VA','2_HF','3_OV','4_AF')
+
+if(isTRUE(rcmm_cov)){
+  plotpaths <- str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/1_UNIVARIATE_KM/',instance,'/', outcomes_of_interest,'/rcmm_cov/') #Need to run separate results because 103 cases -> 100 cases when using expanded covariates
+} else{
+  plotpaths <- str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/1_UNIVARIATE_KM/',instance,'/', outcomes_of_interest,'/') 
+}
+
 
 #Run for UKB - Overall Composite
 km_survival_curv_plotter(ukb_tb,sex,overallcomp_status, overallcomp_age, plotpaths[3]) #Using sex
 km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of NTproBNP
 km_survival_curv_plotter(ukb_tb,hrc_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of HRC
-# km_survival_curv_plotter(ukb_tb,ace2_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of HRC
 
 #Run for UKB - HF Composite
 km_survival_curv_plotter(ukb_tb,sex,hfcomp_status, hfcomp_age, plotpaths[2]) #Using sex
 km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,hfcomp_status,hfcomp_age, plotpaths[2]) #Using top 25% vs. bottom 75% of NTproBNP
 km_survival_curv_plotter(ukb_tb,hrc_categorical,hfcomp_status,hfcomp_age, plotpaths[2]) #Using top 25% vs. bottom 75% of HRC
-# km_survival_curv_plotter(ukb_tb,ace2_categorical,hfcomp_status,hfcomp_age, plotpaths[2]) #Using top 25% vs. bottom 75% of HRC
 
 #Run for UKB - VA Composite
 km_survival_curv_plotter(ukb_tb,sex,vacomp_status, vacomp_age, plotpaths[1]) #Using sex
 km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,vacomp_status,vacomp_age, plotpaths[1]) #Using top 25% vs. bottom 75% of NTproBNP
 km_survival_curv_plotter(ukb_tb,hrc_categorical,vacomp_status,vacomp_age, plotpaths[1]) #Using top 25% vs. bottom 75% of HRC
-# km_survival_curv_plotter(ukb_tb,ace2_categorical,vacomp_status,vacomp_age, plotpaths[1]) #Using top 25% vs. bottom 75% of HRC
+
+#Run for UKB - AF
+km_survival_curv_plotter(ukb_tb,hrc_categorical,af_status,af_age, plotpaths[4]) #Using top 25% vs. bottom 75% of HRC
 ```
 # Cox Regression
 
@@ -229,34 +251,34 @@ To interpret the summary results:
   * LRT preferred at smaller sample sizes but all 3x tests are asymptotically equivalent at large N
 
 ```{r univariate_cox, message=F, warning=F}
-coxph_univariate <- function(input_tb, predictor_var,status, outcome_var){
-  
-    params <- list(fun.time = substitute(eval(parse(text=outcome_var))),
-    fun.event = substitute(eval(parse(text=status))),
-    grouping = substitute(eval(parse(text=predictor_var))), 
-    data = substitute(input_tb))
-    
-    coxph <- substitute(coxph(Surv(fun.time,fun.event)~grouping, data), params)
-    coxph <- eval.parent(coxph)
-    
-    print(str_c('Univariate Cox Regression performed on ', predictor_var, ' variable on ', outcome_var))
-    
-    x <- summary(coxph)
-    #print(x)
-    
-    p.value<-signif(x$wald["pvalue"], digits=3)
-    wald.test<-signif(x$wald["test"], digits=3)
-    beta<-signif(x$coef[1], digits=3);#coeficient beta
-    se_beta <- signif(x$coef[3], digits=3)
-    HR <-signif(x$coef[2], digits=3);#exp(beta)
-    HR.confint.lower <- signif(x$conf.int[,"lower .95"], 3)
-    HR.confint.upper <- signif(x$conf.int[,"upper .95"],3)
-    res<-c(beta, se_beta, HR, HR.confint.lower, HR.confint.upper, wald.test, p.value)
-    names(res)<-c("beta", 'se_beta', "HR", "Lower_95CI_HR","Upper_95CI_HR", "wald.test", 
-                  "p.value")
-    
-    return(res)
-}
+# coxph_univariate <- function(input_tb, predictor_var,status, outcome_var){
+#   
+#     params <- list(fun.time = substitute(eval(parse(text=outcome_var))),
+#     fun.event = substitute(eval(parse(text=status))),
+#     grouping = substitute(eval(parse(text=predictor_var))), 
+#     data = substitute(input_tb))
+#     
+#     coxph <- substitute(coxph(Surv(fun.time,fun.event)~grouping, data), params)
+#     coxph <- eval.parent(coxph)
+#     
+#     print(str_c('Univariate Cox Regression performed on ', predictor_var, ' variable on ', outcome_var))
+#     
+#     x <- summary(coxph)
+#     #print(x)
+#     
+#     p.value<-signif(x$wald["pvalue"], digits=3)
+#     wald.test<-signif(x$wald["test"], digits=3)
+#     beta<-signif(x$coef[1], digits=3);#coeficient beta
+#     se_beta <- signif(x$coef[3], digits=3)
+#     HR <-signif(x$coef[2], digits=3);#exp(beta)
+#     HR.confint.lower <- signif(x$conf.int[,"lower .95"], 3)
+#     HR.confint.upper <- signif(x$conf.int[,"upper .95"],3)
+#     res<-c(beta, se_beta, HR, HR.confint.lower, HR.confint.upper, wald.test, p.value)
+#     names(res)<-c("beta", 'se_beta', "HR", "Lower_95CI_HR","Upper_95CI_HR", "wald.test", 
+#                   "p.value")
+#     
+#     return(res)
+# }
 
 
 ```
@@ -264,7 +286,12 @@ coxph_univariate <- function(input_tb, predictor_var,status, outcome_var){
 
 ```{r univariate_cox_ukb, message=F, warning=F}
 #For UKB
-covariates <- c('sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','smoking','t2d')
+if(isTRUE(rcmm_cov)){
+  covariates <- c('sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','smoking','t2d', 'Townsend', 'eGFR', 'ldl')
+}else {
+  covariates <- c('sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','smoking','t2d')
+}
+
 pp <- c('ntprobnp','hrc') #For Instance 0
 # pp <- c('ntprobnp','ace2') # For 5Y cases
 statuses <- c('vacomp_status','hfcomp_status','overallcomp_status')
@@ -282,51 +309,51 @@ surv_ages <- c('vacomp_age','hfcomp_age','overallcomp_age')
 I also plot the results all together on a single plot of -log10(pvalue) vs. hazard ratio.
 
 ```{r univariate_plot, fig.width=9, fig.height=6}
-univariate_coxph_plotter <- function(univariate_results, plot_output_path, output_name, outcome_levels=c('VA','HF','OVERALL'), FDR=5){
-  
-  univariate_tb <- enframe(univariate_results)%>%
-    unnest(value) %>%
-    mutate(metric=rep(c("beta", 'se_beta', "HR", "Lower_95CI_HR","Upper_95CI_HR", "wald.test", 
-                    "p.value"),length(univariate_results))) %>%
-    pivot_wider(names_from=metric, values_from=value) %>%
-    dplyr::rename(var=name) %>%
-    mutate(label=var) %>%
-    #mutate(label=predictors_xlabel_tb$Label[match(var, predictors_xlabel_tb$Variable)])
-    arrange(label) %>%
-    mutate(predictor=str_to_upper(str_match(label,'(.+)_x_')[,2])) %>%
-    mutate(outcome = factor(
-      str_to_upper(str_match(label,'_x_(.+)comp_age')[,2]),levels=outcome_levels, ordered=T
-    ))
-  
-  if (!is.numeric(FDR)){ #Apply Bonferroni
-    pval_threshold = 0.05/length(univariate_results)
-    mtc <- 'Bonferroni'
-  } else{
-    univariate_tb <- mutate(univariate_tb, p.value=p.adjust(p.value, method='BH'))
-    pval_threshold <- FDR/100
-    mtc <- str_c('FDR ',FDR, '%',sep='')
-  }
-
-  univariate_plot <- ggplot(univariate_tb, aes(HR,-log10(p.value)))+
-    geom_vline(xintercept=1, linetype='dashed',alpha=0.5)+
-    geom_hline(yintercept=-log10(pval_threshold), linetype='dashed', alpha=0.5)+
-    geom_point(aes(col=predictor, shape=outcome),alpha=0.75)+
-    geom_errorbar(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor, shape=outcome),alpha=0.75)+
-    geom_text_repel(aes(label=HR))+
-    scale_colour_brewer(name='Predictor',palette='Dark2')+
-    scale_shape_discrete(name='Outcome')+
-    xlab('Hazard Ratio')+
-    ylab(ifelse(mtc=='Bonferroni','-log10 (Wald-test p value)', '-log10 (Adjusted Wald-test p value)'))+
-    scale_x_continuous(n.breaks=10)+
-    labs(title=str_wrap(str_c('Univariate Cox Regression analysis for ', length(univariate_results), ' tests')),caption=str_c(mtc, ' p-value Threshold Indicated; Error Bars = 95% CI'))+
-    theme(legend.position="bottom")+
-     guides(col=guide_legend(nrow=1, byrow=TRUE)) 
-  
-  print(univariate_plot)
-  ggsave(str_c(plot_output_path, 'cox_univariate_', output_name,'.png'), dpi=600, width=9, height=6)
-  
-  return(univariate_tb)
-}
+# univariate_coxph_plotter <- function(univariate_results, plot_output_path, output_name, outcome_levels=c('VA','HF','OVERALL'), FDR=5){
+#   
+#   univariate_tb <- enframe(univariate_results)%>%
+#     unnest(value) %>%
+#     mutate(metric=rep(c("beta", 'se_beta', "HR", "Lower_95CI_HR","Upper_95CI_HR", "wald.test", 
+#                     "p.value"),length(univariate_results))) %>%
+#     pivot_wider(names_from=metric, values_from=value) %>%
+#     dplyr::rename(var=name) %>%
+#     mutate(label=var) %>%
+#     #mutate(label=predictors_xlabel_tb$Label[match(var, predictors_xlabel_tb$Variable)])
+#     arrange(label) %>%
+#     mutate(predictor=str_to_upper(str_match(label,'(.+)_x_')[,2])) %>%
+#     mutate(outcome = factor(
+#       str_to_upper(str_match(label,'_x_(.+)comp_age')[,2]),levels=outcome_levels, ordered=T
+#     ))
+#   
+#   if (!is.numeric(FDR)){ #Apply Bonferroni
+#     pval_threshold = 0.05/length(univariate_results)
+#     mtc <- 'Bonferroni'
+#   } else{
+#     univariate_tb <- mutate(univariate_tb, p.value=p.adjust(p.value, method='BH'))
+#     pval_threshold <- FDR/100
+#     mtc <- str_c('FDR ',FDR, '%',sep='')
+#   }
+# 
+#   univariate_plot <- ggplot(univariate_tb, aes(HR,-log10(p.value)))+
+#     geom_vline(xintercept=1, linetype='dashed',alpha=0.5)+
+#     geom_hline(yintercept=-log10(pval_threshold), linetype='dashed', alpha=0.5)+
+#     geom_point(aes(col=predictor, shape=outcome),alpha=0.75)+
+#     geom_errorbar(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor, shape=outcome),alpha=0.75)+
+#     geom_text_repel(aes(label=HR))+
+#     scale_colour_brewer(name='Predictor',palette='Dark2')+
+#     scale_shape_discrete(name='Outcome')+
+#     xlab('Hazard Ratio')+
+#     ylab(ifelse(mtc=='Bonferroni','-log10 (Wald-test p value)', '-log10 (Adjusted Wald-test p value)'))+
+#     scale_x_continuous(n.breaks=10)+
+#     labs(title=str_wrap(str_c('Univariate Cox Regression analysis for ', length(univariate_results), ' tests')),caption=str_c(mtc, ' p-value Threshold Indicated; Error Bars = 95% CI'))+
+#     theme(legend.position="bottom")+
+#      guides(col=guide_legend(nrow=1, byrow=TRUE)) 
+#   
+#   print(univariate_plot)
+#   ggsave(str_c(plot_output_path, 'cox_univariate_', output_name,'.png'), dpi=600, width=9, height=6)
+#   
+#   return(univariate_tb)
+# }
 ```
 
 
@@ -416,6 +443,13 @@ cor(ukb_tb$ntprobnp, ukb_tb$ace2, method='spearman', use='pairwise.complete.obs'
 
 
 ```
+Try with only HRC x AF outcome.
+
+```{r}
+multivariate_cox(input_tb = ukb_tb, marginal_predictor = 'hrc',covariates = covariates,status = 'af_status',outcome_var = 'af_age',outcome_levels = 'AF')
+```
+
+
 #### Multivariate Summary Plotting
 
 Now plot a summary plot of the results for each predictor.
@@ -437,7 +471,7 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
     geom_vline(xintercept=1, linetype='dashed',alpha=0.5)+
     geom_hline(yintercept=-log10(pval_threshold), linetype='dashed', alpha=0.5)+
     geom_point(aes(col=predictor, shape=outcome),alpha=0.75)+
-    geom_errorbar(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor, shape=outcome),alpha=0.75)+
+    geom_errorbarh(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor, shape=outcome),alpha=0.75, height=0.1)+
     geom_text_repel(aes(label=HR))+
     scale_colour_brewer(name='Predictor',palette='Dark2')+
     scale_shape_discrete(name='Outcome')+
@@ -454,11 +488,15 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
   return(multivariate_results)
 }
 
-multivariate_coxph_plotter(multivariate_cox_results, str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/'), 'ntprobnp_hrc_alloutcomes_fdr5')
-multivariate_coxph_plotter(multivariate_cox_results, str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/'), 'ntprobnp_hrc_alloutcomes_bonferroni', FDR=F)
-# 
-# multivariate_coxph_plotter(multivariate_cox_results, str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/'), 'ntprobnp_ace2_alloutcomes_fdr5')
-# multivariate_coxph_plotter(multivariate_cox_results, str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/'), 'ntprobnp_ace2_alloutcomes_bonferroni', FDR=F)
+if(isTRUE(rcmm_cov)){
+  path <- str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/rcmm_cov/')
+} else{
+  str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/')
+}
+
+multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_hrc_alloutcomes_fdr5')
+multivariate_coxph_plotter(multivariate_cox_results, path, 'ntprobnp_hrc_alloutcomes_bonferroni', FDR=F)
+
 ```
 ### Cox Assumptions
 
@@ -479,24 +517,129 @@ The plot of horizontal line in the plot should be flat to indicate that the assu
 
 ```{r ph_assumptions,fig.width=9, fig.height=6}
 
-ph_assumption_tester <- function(model, plot_output_path, plot=T){
+ph_assumption_tester <- function(model, plot_output_path='', plot=T){
+  print(plot_output_path)
   
   ph_assumption_test <- cox.zph(model)
   print(ph_assumption_test)
 
   if(isTRUE(plot)){
-     walk(rownames(ph_assumption_test$table)[1:nrow(ph_assumption_test$table)-1], ~ggcoxzph(ph_assumption_test, var=.) %>% ggsave(filename=str_c(plot_output_path, '/ss_',.)))
+     walk(rownames(ph_assumption_test$table)[1:nrow(ph_assumption_test$table)-1], ~ggcoxzph(ph_assumption_test, var=.) %>% print() 
+          #%>%
+          #  ggsave(filename=str_c(plot_output_path, '_ss.png',.), dpi=600)
+          )
   }
  
   return(ph_assumption_test)
-  
 }
 
-ph_assumption_paths <- (expand_grid(surv_ages, pp) %>% mutate(path = str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/ASS/', surv_ages, pp, sep='/')))$path
+ph_assumption_paths <- (expand_grid(surv_ages, pp) %>% mutate(path = str_c('OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/ASS/', str_match(surv_ages, '^(.+)_age')[,2],'_', pp)))$path
 multivariate_cox_ph <- map2(multivariate_cox_models, ph_assumption_paths, ~ph_assumption_tester(.x, .y))
+```
+Sex appears to violate the PH assumption for HRC/NTproBNP x Overall Composite so I attempt to correct this here.
 
+The two main ways to correct for violation of this proportional hazards assumption is
+
+1. Inclusion of an interaction term between predictor and the timescale used
+2. Stratification of a categorical predictor term
+
+The interaction term inclusion relaxes the PH assumption by accounting for a change in the coefficient (i.e hazard ratio) over the timescale e.g 
+At age 30, the hazard ratio associated with 1-year increase in age of diagnosis = 0.9 but at age 50, this might be 0.95.
+
+However, the interaction term itself assumes either a linear or other relationship between the coefficient and the timescale.
+
+It is also important to note that **by including the interaction term, the main effect term no longer represents the main effect. It instead represents the effect at timescale=0**.
+So with age at diagnosis, the hazard ratio of 0.88 represents the hazard ratio associated with 1-unit increase in diagnosis_age at birth.
+
+```{r fix_ph_assumption}
+ph_assumption_fixer <- function(data_tb, pp_of_interest, y_formula ="Surv(overallcomp_age,overallcomp_status)", predictors_to_fix=c('sex'), other_covariates = c('bmi','pc1','pc2','pc3','pc4','pc5','dbp','smoking','t2d','Townsend','eGFR','ldl'), model_return=F){
+
+  predictors_of_interest <- c(str_c(predictors_to_fix, '2'), other_covariates, pp_of_interest,str_c('tt(',predictors_to_fix, '2)'))
+  
+  x <- str_c(predictors_of_interest, collapse='+')
+  y <- y_formula
+  formula <- as.formula(paste(y,'~',x))
+  
+    for (i in seq_along(predictors_to_fix)){
+      data_tb[str_c(predictors_to_fix[i], '2')] <- data_tb[predictors_to_fix[i]]
+    
+  }
+  
+  if ('sex' %in% predictors_to_fix){
+    data_tb <- mutate(data_tb, sex2=ifelse(sex=='Male',1,0))
+  } 
+  
+
+  multivariate_cox_interactions <- coxph(formula, data=data_tb, tt=function(x,t,...) x*t) #Adds an interaction term between timescale and the predictor to try fix the PH assumption violation
+  print(summary(multivariate_cox_interactions))
+  
+  #Double check if the interaction term is valid
+  
+  # print(str_c('Showing hazard ratio associated with having Male sex over timescale with the inflection timepoint = ',signif(-1*coef(multivariate_cox_interactions)["sex2"] /
+  #   coef(multivariate_cox_interactions)["tt(sex2)"]),3)) #This is the inflection age at which the gradient is 0 i.e no variation in hazard ratio over time
+  
+  for(i in seq_along(predictors_to_fix)){
+#This plots the sum of the baseline hazard ratio (i.e main effect when timescale=0) + the time-dependent hazard ratio at each time x
+  SUB    <- ukb_tb$overallcomp_status == 1
+  TIME   <- seq(min(ukb_tb$overallcomp_age[SUB]), #Assume overallcomp
+                max(ukb_tb$overallcomp_age[SUB]), 1)
+  BETA   <- coef(multivariate_cox_interactions)[str_c(predictors_to_fix[i],'2')]
+  BETATT <- coef(multivariate_cox_interactions)[str_c('tt(',predictors_to_fix[i],'2)')]
+  AHR    <- exp(BETA + BETATT*TIME)
+  
+  plot(TIME, AHR, type = "l", xlab='Age', ylab=str_c('Hazard Ratio of ', predictors_to_fix[i]))
+  abline(h = 1, lty = 2, col = "darkgray")
+  abline(v = -1*BETA/BETATT, lty = 2, col = "darkgray")
+  }
+  
+  if(isTRUE(model_return)){
+    return(multivariate_cox_interactions)
+  }
+  
+  #This returns the coefficient values from the CoxPH model fitted
+  
+  x <- summary(multivariate_cox_interactions)
+    
+  p.value<-signif(x$coef[1:nrow(x$coef),5], digits=3)
+  beta<-signif(x$coef[1:nrow(x$coef),1], digits=3);#coeficient beta
+  HR <-signif(x$coef[1:nrow(x$coef),2], digits=3);#exp(beta) = hazard ratio
+  HR.confint.lower <- signif(x$conf.int[,"lower .95"], 3)
+  HR.confint.upper <- signif(x$conf.int[,"upper .95"],3)
+  se_beta <- signif(x$coef[1:nrow(x$coef),3], digits=3)
+  vars <- rownames(x$coef)
+  
+  res<-bind_cols(vars,beta, se_beta, HR, HR.confint.lower, HR.confint.upper, p.value) %>%
+    mutate(predictor=str_to_upper(vars)) 
+  
+  names(res)<-c('var',"beta",'se_beta', "HR", "Lower_95CI_HR","Upper_95CI_HR", 
+            "p.value", 'predictor')
+  
+  return(res)
+
+}
+
+# td_covar_ntprobnp_overallcomp <- ph_assumption_fixer(ukb_tb, 'ntprobnp') %>% mutate(outcome='OVERALL')
+# td_covar_hrc_overallcomp <-ph_assumption_fixer(ukb_tb, 'hrc', predictors_to_fix=c('sex','bmi')) %>% mutate(outcome='OVERALL')
+# 
+# #Update multivariate cox results with these adjusted 
+# multivariate_cox_results_timeadj <- multivariate_cox_results %>%
+#   filter(!(var %in% c('ntprobnp','hrc') & outcome=='OVERALL')) %>%
+#   bind_rows(filter(td_covar_ntprobnp_overallcomp, var=='ntprobnp')) %>%
+#   bind_rows(filter(td_covar_hrc_overallcomp, var=='hrc')) %>%
+#   mutate(outcome=factor(outcome, levels=c('VA','HF','OVERALL')))
+# 
+# rm(list=ls(pattern='td_covar'))
+# 
+# #Replot the summary
+# multivariate_coxph_plotter(multivariate_cox_results_timeadj,str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/'), 'ntprobnp_hrc_alloutcomes_fdr5_timeadj')
+# multivariate_coxph_plotter(multivariate_cox_results_timeadj,str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/'), 'ntprobnp_hrc_alloutcomes_bonferroni_timeadj', FDR=F)
+# 
+# #These output the models itself
+# td_covar_ntprobnp_overallcomp_model <- ph_assumption_fixer(ukb_tb, 'ntprobnp', model_return=T)
+# td_covar_hrc_overallcomp_model <-ph_assumption_fixer(ukb_tb, 'hrc', predictors_to_fix=c('sex','bmi'), model_return=T)
 
 ```
+
 #### Influential Observations
 
 This looks at the influential observations e.g outliers/high-leverage observations which may influence the model.
@@ -506,10 +649,17 @@ Ideally, you want the largest y-values in these plots to be << actual coefficien
 
 ```{r dfbeta, fig.width=15, fig.height=15, message=F, warning=F}
 
-knitr::kable(multivariate_cox_tb2)
+print(summary(td_covar_ntprobnp_overallcomp_model)) #These are the actual coefficients
 
-# print(ggcoxdiagnostics(multivariate_cox_interactions, type = "dfbeta",
-#                  linear.predictions = FALSE, ggtheme = theme_bw()))
+#This is for the NTproBNP x overall comp
+print(ggcoxdiagnostics(td_covar_ntprobnp_overallcomp_model, type = "dfbeta",
+                 linear.predictions = FALSE, ggtheme = theme_classic()))
+
+print(summary(td_covar_hrc_overallcomp_model)) #These are the actual coefficients
+
+#This is for the HRCx overall comp
+print(ggcoxdiagnostics(td_covar_hrc_overallcomp_model, type = "dfbeta",
+                 linear.predictions = FALSE, ggtheme = theme_classic()))
 ```
 
 The second plots show the deviance residuals such that positive values = individuals that 'died too soon' compared to expected survival time, negative values = individuals that 'lived too long' so presence of very large or very small values indicates outliers.
@@ -527,28 +677,32 @@ I also test for non-linearity as the Cox regression model assumes linear relatio
 
 This is tested for the **continuous predictors** by plotting the Martingale residuals against the continuous predictors. Their values range from -Infinity to +1 such that a value near 1 suggests individuals that 'died too soon' and a large negative value indicates individuals that 'lived too long'.
 
+The expected line for a linear relationship = straight horizontal line at y=0.
+
 Note that linearity does not influence categorical variables.
 
 The resultant line (fitted with loess) should be linear to satisfy the linearity assumption.
 
 ```{r martingale, fig.width=7, fig.height=7}
-# martingale_plotter <- function(input_tb, var){
-# 
-#   #input_tb <- filter(input_tb, !is.na(var))
-#   
-#   x <- str_c(var,paste('log(',var,')',sep=''),paste('I(sqrt(',var,'))',sep=''), paste('I(',var,'^2)',sep='')sep='+')
-#   y <- "Surv(lastfollowup_age,status)"
-#   formula <- as.formula(paste(y,'~',x))
-#   
-#   ggcoxfunctional(formula,data=filter(input_tb, !is.na(var)))
-# }
-# 
-# martingale_plotter(ukb_tb, 'bmi')
+martingale_plotter <- function(input_tb, var, y_formula="Surv(overallcomp_age, overallcomp_status)"){
 
-ggcoxfunctional(Surv(lastfollowup_age,status)~diagnosis_age + log(diagnosis_age)+I(sqrt(diagnosis_age)) + I(diagnosis_age^2), data=filter(ukb_tb,!is.na(diagnosis_age), diagnosis_age!=0))
-ggcoxfunctional(Surv(lastfollowup_age,status)~bmi + log(bmi)+I(sqrt(bmi)) + I(bmi^2), data=filter(ukb_tb,!is.na(bmi)))
-ggcoxfunctional(Surv(lastfollowup_age,status)~sbp + log(sbp)+I(sqrt(sbp))+ I(sbp^2), data=filter(ukb_tb,!is.na(sbp)))
-ggcoxfunctional(Surv(lastfollowup_age,status)~cv_prs + I(cv_prs^2), data=filter(ukb_tb,!is.na(cv_prs)))
+  #input_tb <- filter(input_tb, !is.na(var))
+
+  x <- str_c(var,paste('log(',var,')',sep=''),paste('I(sqrt(',var,'))',sep=''), paste('I(',var,'^2)',sep=''),sep='+')
+  y <- y_formula
+  formula <- as.formula(paste(y,'~',x))
+
+  ggcoxfunctional(formula,data=filter(input_tb, !is.na(var)))
+}
+
+martingale_plotter(ukb_tb, 'bmi')
+
+#Because the pp values are inverse-rank normalised, there are negative values so only check squared and normal
+
+ggcoxfunctional(as.formula('Surv(overallcomp_age, overallcomp_status)~ntprobnp + I(ntprobnp^2)'), data=filter(ukb_tb,!is.na(ntprobnp), ntprobnp!=0))
+ggcoxfunctional(as.formula('Surv(overallcomp_age, overallcomp_status)~hrc + I(hrc^2)'), data=filter(ukb_tb,!is.na(hrc), hrc!=0))
+
+ggcoxfunctional(as.formula('Surv(overallcomp_age, overallcomp_status)~bmi + I(bmi^2) + log(bmi) + I(sqrt(bmi))'), data=filter(ukb_tb,!is.na(bmi), bmi!=0))
 ```
 
 
