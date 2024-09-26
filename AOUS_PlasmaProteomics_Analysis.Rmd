@@ -34,6 +34,7 @@ read_bq_export_from_workspace_bucket <- function(export_path) {
 }
 ```
 
+
 This dataset is as per V7 of the Controlled Tier btw!
 
 ```{r}
@@ -55,6 +56,11 @@ smoking_observations <- read_bq_export_from_workspace_bucket('gs://fc-secure-795
 bmi_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240912/measurement_92917084/measurement_92917084_*.csv')
 
 dbp_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240912/measurement_33758345/measurement_33758345_*.csv')
+
+zip_socioeconomic_observations <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240925/zip_code_socioeconomic_18092247/zip_code_socioeconomic_18092247_*.csv') %>%
+  select(person_id, observation_datetime, deprivation_index)
+
+creatinine_hdl_ldl <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240925/measurement_97213600/measurement_97213600_*.csv')
 ```
 ## Transform Data
 
@@ -143,7 +149,7 @@ rm(dbp_measurements)
 ## Merge across blood/serum/plasma based measurements
 ## Separate out assays based on enzymatic activity
 
-biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_interest, upper_limit){
+biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_interest, upper_limit, chosen_conc_unit='ng/mL',molar_mass=NA ){#For creatinine
   
   filtered_tb <- input_tb %>%
     filter(str_detect(standard_concept_name, biomarker_of_interest)) %>%
@@ -157,11 +163,17 @@ biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_intere
   #Filter out those measuring activity (as opposed to concentration) and other values of measurement units
   #This also removes those which simply have 'nanogram' or 'picogram' without a volume present
   filtered_tb <- filtered_tb %>%
-    filter(str_detect(unit_concept_name, 'per|/|liter'), !str_detect(unit_concept_name, 'unit|u/L|percent|thousand')) #Remove activity measures
+    filter(str_detect(unit_concept_name, 'per|/'), str_detect(unit_concept_name,'liter'), !str_detect(unit_concept_name, 'unit|u/L|percent|thousand'), !str_detect(unit_concept_name, 'minute|hours')) #Remove activity or rate measures
+  
+  if(is.na(molar_mass)){
+     filtered_tb <- filtered_tb %>%
+    filter(!str_detect(unit_concept_name, 'mole')) #Remove amount based moles units
+  }
   
   print(table(filtered_tb$unit_concept_name)) #This outlines the different measurement units for the measurement after filtering
   
-  #Harmonise the units of measurement to ng/mL
+  if(chosen_conc_unit=='ng/mL'){
+      #Harmonise the units of measurement to ng/mL
   harmonised_tb <- filtered_tb %>%
     mutate(mass_multiplier = case_when(str_detect(unit_concept_name, '^microgram|^ug|^μg') ~ 1000,
                                        str_detect(unit_concept_name, '^picogram|^pg') ~ 1/1000,
@@ -174,13 +186,40 @@ biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_intere
                                        str_detect(unit_concept_name, 'per microliter$|/uL$|/μL$') ~ 1000,
                                        str_detect(unit_concept_name, 'per milliliter$|/mL$') ~ 1,
                                        T~NA))
-  if(nrow(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier))) >= 1){ #See those which don't obey the harmonisation
-    View(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier)))
+    if(nrow(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier))) >= 1){ #See those which don't obey the harmonisation
+      View(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier)))
+    }
+    
+    harmonised_tb <- harmonised_tb %>%
+      mutate(value_as_number = value_as_number * mass_multiplier * volume_multiplier,
+             unit_concept_name = 'ng/mL')
+    
+  } else if(chosen_conc_unit=='mg/dL'){ #For creatinine/HDL/LDL
+    
+    harmonised_tb <- filtered_tb %>%
+          mutate(mass_multiplier = case_when(str_detect(unit_concept_name, '^microgram|^ug|^μg') ~ 1/1000,
+                                       str_detect(unit_concept_name, '^micromole|^umol|^μmol') ~ molar_mass/10^6 * 1000, #Convert to g -> milligrams
+                                       str_detect(unit_concept_name, '^gram|^g') ~ 1000,
+                                       str_detect(unit_concept_name, '^milligram|^mg') ~ 1,
+                                       str_detect(unit_concept_name, '^millimole|^mmol') ~ molar_mass/10^3 * 1000, #Convert to g -> milligrams
+                                       str_detect(unit_concept_name, '^nanogram|^ng') ~ 1/10^6,
+                                                  T~NA),
+           volume_multiplier = case_when(str_detect(unit_concept_name, 'per liter|/L') ~ 1/10,
+                                       str_detect(unit_concept_name, 'per deciliter|/dL') ~ 1,
+                                       str_detect(unit_concept_name, 'per microliter|/uL|/μL') ~ 1000*1000,
+                                       str_detect(unit_concept_name, 'per milliliter|/mL') ~ 100,
+                                       T~NA))
+    
+      if(nrow(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier))) >= 1){ #See those which don't obey the harmonisation
+        View(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier)))
+      }
+    
+        harmonised_tb <- harmonised_tb %>%
+      mutate(value_as_number = value_as_number * mass_multiplier * volume_multiplier,
+             unit_concept_name = 'mg/dL')
+      
   }
-  
-  harmonised_tb <- harmonised_tb %>%
-    mutate(value_as_number = value_as_number * mass_multiplier * volume_multiplier,
-           unit_concept_name = 'ng/mL')
+
   
   #Output tb with columns for person ID, measurement_datetime and biomarker concentration with operator
   output_tb <- harmonised_tb %>%
@@ -209,6 +248,19 @@ names(cardio_biomarkers_cleaned) <- biomarker_names
 rm(cardio_biomarkers)
 ```
 
+Also clean the creatinine; HDL; LDL measurements.
+
+```{r}
+biomarkers2 <- c('Creatinine', 'HDL','LDL')
+upper_limits2 <- c(2000,1000,3000) #This defines the upper limit for cutoff in ng/mL for each biomarker based on EDA of the transformed values
+molar_masses <- c(113.12,NA,NA)
+
+creatinine_hdl_ldl_cleaned <- pmap(list(biomarkers2, upper_limits2,molar_masses), ~biomarker_cleaner(creatinine_hdl_ldl, ..1,..1,..2, chosen_conc_unit='mg/dL',molar_mass=..3))
+names(creatinine_hdl_ldl_cleaned) <- biomarkers2 
+
+```
+
+
 ### Merge Covariates Tibbles
 
 ```{r}
@@ -220,6 +272,10 @@ demo_cov <- demographics_cleaned %>%
 
 demo_cov <- demo_cov %>%
   mutate(race=ifelse(race %in% c('None Indicated','I prefer not to answer','PMI: Skip', 'None of these'), NA, race))
+
+#Add the deprivation index covatriate
+demo_cov <- demo_cov %>%
+  left_join()
 
 rm(demographics_cleaned, bmi_cleaned, dbp_cleaned)
 ```
@@ -237,6 +293,10 @@ label_tb <- tribble(
  
  'smoking_status', 'Smoking Status' ,NA,
  't2d','Type 2 diabetes Status', NA,
+ 'eGFR', 'Estimated glomerular filtration rate (from cystatin)','mg/dL',
+ 'ldl', 'LDL cholsterol levels','mg/dL',
+ 'hdl','HDL cholsterol levels','mg/dL',
+ 
  'hcm', 'Hypertrophic Cardiomyopathy Status', NA,
  'hf', 'Heart Failure Status', NA,
  
@@ -258,6 +318,7 @@ saveRDS(demo_cov, 'DATA/all_demo_bmi_dbp.rds')
 saveRDS(diagnoses_cleaned, 'DATA/all_hcm_hf_t2d_diag.rds')
 saveRDS(smoking_cleaned, 'DATA/all_smoking.rds')
 saveRDS(cardio_biomarkers_cleaned, 'DATA/all_pp.rds')
+saveRDS(creatinine_hdl_ldl_cleaned, 'DATA/all_creatinine_hdl_ldl.rds')
 ```
 
 ```{r}
@@ -565,6 +626,7 @@ colnames(genetic_ancest)[6:21] <- str_c('pc',seq(1,16))
 
 genetic_ancest <- genetic_ancest %>%
   mutate(across(pc1:pc16, ~as.numeric(.)))
+saveRDS(genetic_ancest, 'DATA/all_geneticancest.rds')
 
 #Add to each biomarker tb
 biomarker_diagnoses_demo2_lst <- map(biomarker_diagnoses_demo_lst, ~left_join(.,select(genetic_ancest, person_id=research_id, ancestry_pred, pc1:pc5),by='person_id'))
@@ -584,6 +646,8 @@ i0_5y_na_toF <- function(input_tb){
 
 biomarker_diagnoses_demo2_lst <- map(biomarker_diagnoses_demo2_lst, ~i0_5y_na_toF(.))
 saveRDS(biomarker_diagnoses_demo2_lst, 'DATA/biomarker_diagnoses_demo2_lst.rds')
+
+biomarker_diagnoses_demo2_lst <- readRDS('DATA/biomarker_diagnoses_demo2_lst.rds')
 ```
 
 This evaluates how many non-NA individuals exist for any combination of covariates used.
@@ -922,5 +986,100 @@ rm(nonhcm_hf_vs_nonhcmhf_ov,
   
 #Plot for each instance
 walk2(nonhcm_hf_vs_nonhcmhf_results, instances, ~perinstance_plotter(.x,.y, predictor = 'HF Status', output_folder='HF/'))
+```
+
+# REGENIE Prep
+
+This prepares the phenotype and covariate files for all individuals who are non-NA in the genetic ancestry tibble (i.e genetic PCs) = 245394 individuals.
+These also correspond to the individuals with srWGS in All of Us V7 dataset.
+
+```{r}
+#Import height and weight physical measurements
+
+htwt_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240919/measurement_45391419/measurement_45391419_*.csv')
+
+htwt_measurements <- htwt_measurements %>%
+  select(person_id,value=value_as_number,standard_concept_name,measurement_datetime=measurement_datetime) %>%
+  filter(!is.na(value))
+
+ht_measurements <- htwt_measurements %>%
+  filter(str_detect(standard_concept_name,'height')) %>%
+  pivot_wider(names_from=standard_concept_name, values_from=value) %>%
+  dplyr::rename(ht='Body height') %>%
+  group_by(person_id) %>%
+  filter(measurement_datetime==max(measurement_datetime)) %>% unique() %>% #Take the most recent measurement
+  ungroup()%>%
+  select(person_id, ht)
+
+wt_measurements <- htwt_measurements %>%
+  filter(str_detect(standard_concept_name,'weight')) %>%
+  pivot_wider(names_from=standard_concept_name, values_from=value) %>%
+  dplyr::rename(wt='Body weight') %>%
+  group_by(person_id) %>%
+  filter(measurement_datetime==max(measurement_datetime)) %>% unique() %>% #Take the most recent measurement
+  ungroup() %>%
+  select(person_id, wt)
+
+htwt_measurements <- full_join(ht_measurements, wt_measurements, by='person_id')
+rm(ht_measurements, wt_measurements)
+```
+
+Prepare the covariates file.
+
+```{r}
+
+regenie_cov <- select(genetic_ancest, person_id=research_id,pc1:pc10) %>%
+  left_join(select(demo_cov, person_id, sex=sex_at_birth), by='person_id') %>%
+  left_join(htwt_measurements, by='person_id')
+
+#Add in an age covariate which is different for each biomarker
+for (i in seq_along(biomarker_diagnoses_demo2_lst)){
+  regenie_cov <- regenie_cov %>%
+    left_join(select(biomarker_diagnoses_demo2_lst[[i]], person_id, age), by='person_id')
+  colnames(regenie_cov)[ncol(regenie_cov)] <- str_c('age_',names(biomarker_diagnoses_demo2_lst)[i])
+}
+
+#Final formatting
+
+regenie_cov <- regenie_cov %>%
+  mutate(FID=person_id, IID=person_id) %>%
+  select(FID, IID, everything()) %>%
+  select(-person_id)
+
+write_tsv(regenie_cov,'DATA/pp_regenie_cov.tsv')
+
+```
+
+Prepare the phenotypes file for plasma proteins.
+
+```{r}
+
+regenie_pp <- select(genetic_ancest, person_id=research_id) 
+
+for (i in seq_along(biomarker_diagnoses_demo2_lst)){
+  regenie_pp <- regenie_pp %>%
+    left_join(select(biomarker_diagnoses_demo2_lst[[i]], person_id, 2), by='person_id')
+  colnames(regenie_cov)[ncol(regenie_cov)] <- names(biomarker_diagnoses_demo2_lst)[i]
+}
+
+#Final formatting
+
+regenie_pp <- regenie_pp %>%
+  mutate(FID=person_id, IID=person_id) %>%
+  select(FID, IID, everything()) %>%
+  select(-person_id)
+
+write_tsv(regenie_pp,'DATA/pp_regenie_pheno.tsv')
+
+```
+
+# Upload to Bucket
+
+This uploads all the files in the PP folder to the GCP Bucket.
+
+```{r}
+
+system('gsutil cp -m -r ~/rstudio/PP/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/' )
+
 ```
 
