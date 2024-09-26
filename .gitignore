@@ -55,5 +55,8 @@ rsconnect/
 *.xlsx
 *.RStudio
 *.rds
+*.jar
+*.json
 
 OUTPUT/*
+DATA/CKB/*

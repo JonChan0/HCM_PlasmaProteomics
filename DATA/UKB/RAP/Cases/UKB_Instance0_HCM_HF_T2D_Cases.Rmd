@@ -315,3 +315,16 @@ i0_5Y_tbs <- map2(i0_death_tbs, list('HCM','HF','T2D'), ~fiveyear_extractor(.x, 
 saveRDS(i0_5Y_tbs, '../../PROCESSED/ukb_rap_i0_5Y_cases.rds')
 ```
 
+This outputs the total tb of when total HCM cases were diagnosed as a minimum of selfrep; hospital; death cause dates.
+
+```{r}
+
+hcm_tb2 <- death_date_extractor(hcm_tb,death_dates, death_cause_record, 'I42.1|I42.2') %>%
+  rowwise() %>%
+  mutate(min_diag_date2 = min(min_diag_date, death_date, na.rm=T))%>%
+  mutate(min_diag_date2 = as_date(ifelse(is.infinite(min_diag_date2), NA, min_diag_date2)))
+
+saveRDS(hcm_tb2, '../../PROCESSED/3_TOTAL/ukb_diagnosis_dates_minimum.rds')
+
+```
+
