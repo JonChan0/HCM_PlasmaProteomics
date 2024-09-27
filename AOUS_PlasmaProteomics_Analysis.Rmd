@@ -58,7 +58,7 @@ bmi_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92
 dbp_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240912/measurement_33758345/measurement_33758345_*.csv')
 
 zip_socioeconomic_observations <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240925/zip_code_socioeconomic_18092247/zip_code_socioeconomic_18092247_*.csv') %>%
-  select(person_id, observation_datetime, deprivation_index)
+  select(person_id, deprindex_observation_datetime=observation_datetime, deprivation_index)
 
 creatinine_hdl_ldl <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240925/measurement_97213600/measurement_97213600_*.csv')
 ```
@@ -226,8 +226,9 @@ biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_intere
     select(person_id, operator_concept_name, value_as_number, measurement_datetime) %>%
     mutate(operator_concept_name = ifelse(operator_concept_name=='No matching concept'|is.na(operator_concept_name), '=', operator_concept_name)) %>%  #If no operator given, assume =
     filter(value_as_number >= 0) %>% #Filter out negative values for concentration
-    filter(value_as_number < upper_limit) #Filter only for values below the upper limit
-    
+    filter(value_as_number < upper_limit) %>% #Filter only for values below the upper limit
+    mutate(measurement_datetime=as_datetime(measurement_datetime)) 
+  
   colnames(output_tb)[3] <- colname_of_interest
   colnames(output_tb)[4] <- str_c(colname_of_interest, '_measurement_datetime')
   
@@ -275,9 +276,9 @@ demo_cov <- demo_cov %>%
 
 #Add the deprivation index covatriate
 demo_cov <- demo_cov %>%
-  left_join()
+  left_join(zip_socioeconomic_observations, by='person_id')
 
-rm(demographics_cleaned, bmi_cleaned, dbp_cleaned)
+rm(demographics_cleaned, bmi_cleaned, dbp_cleaned, zip_socioeconomic_observations)
 ```
 
 ```{r}
@@ -293,6 +294,7 @@ label_tb <- tribble(
  
  'smoking_status', 'Smoking Status' ,NA,
  't2d','Type 2 diabetes Status', NA,
+ 'creatinine', 'Creatinine levels', 'mg/dL',
  'eGFR', 'Estimated glomerular filtration rate (from cystatin)','mg/dL',
  'ldl', 'LDL cholsterol levels','mg/dL',
  'hdl','HDL cholsterol levels','mg/dL',
@@ -314,7 +316,7 @@ label_tb <- tribble(
 ```{r}
 #Save RDS objects for reimport
 
-saveRDS(demo_cov, 'DATA/all_demo_bmi_dbp.rds')
+saveRDS(demo_cov, 'DATA/all_demo_bmi_dbp_deprivation.rds')
 saveRDS(diagnoses_cleaned, 'DATA/all_hcm_hf_t2d_diag.rds')
 saveRDS(smoking_cleaned, 'DATA/all_smoking.rds')
 saveRDS(cardio_biomarkers_cleaned, 'DATA/all_pp.rds')
@@ -323,10 +325,11 @@ saveRDS(creatinine_hdl_ldl_cleaned, 'DATA/all_creatinine_hdl_ldl.rds')
 
 ```{r}
 #Reimport RDS objects
-demo_cov <- readRDS('DATA/all_demo_bmi_dbp.rds')
+demo_cov <- readRDS('DATA/all_demo_bmi_dbp_deprivation.rds')
 diagnoses_cleaned <- readRDS('DATA/all_hcm_hf_t2d_diag.rds')
 smoking_cleaned <- readRDS('DATA/all_smoking.rds')
 cardio_biomarkers_cleaned <- readRDS('DATA/all_pp.rds')
+creatinine_hdl_ldl_cleaned <- readRDS('DATA/all_creatinine_hdl_ldl.rds')
 ```
 
 ## EDA
@@ -341,6 +344,8 @@ length(unique(smoking_cleaned$person_id))
 walk(diagnoses_cleaned, ~print(length(unique(.[['person_id']])))) #HCM/HF/T2D
 
 walk(cardio_biomarkers_cleaned, ~print(length(unique(.[['person_id']])))) #NPPB/NTproBNP/TnI/TnT/BAP
+
+walk(creatinine_hdl_ldl_cleaned, ~print(length(unique(.[['person_id']])))) #Creatinine/HDL/LDL
 ```
 
 
@@ -415,6 +420,7 @@ walk(c(3,5,7), ~single_col_dist_plotter(demo_cov, .,label_tb,save=T))
 ##N.B I assume that the > and < operators are ~ =. This assumes that those individuals above/below the limit of detection have measures of their limits i.e bias towards the median as opposed to the ground truth.
 
 walk(cardio_biomarkers_cleaned, ~single_col_dist_plotter(., 3, label_tb, save=T))
+walk(creatinine_hdl_ldl_cleaned, ~single_col_dist_plotter(., 3, label_tb, save=T))
 
 ```
 ### Discrete Variable EDA
@@ -541,7 +547,7 @@ names(diagnoses_cleaned) <- condition_names
 biomarker_diagnoses_list <- map(cardio_biomarkers_cleaned, ~biomarker_diagnoses_formatter(.,diagnoses_cleaned))
 saveRDS(biomarker_diagnoses_list, 'DATA/biomarker_list_hcm_hf_t2d_statuses_i0_5Y_overall.rds')
 
-#biomarker_diagnoses_list <- readRDS('DATA/biomarker_list_hcm_hf_t2d_statuses_i0_5Y_overall.rds')
+biomarker_diagnoses_list <- readRDS('DATA/biomarker_list_hcm_hf_t2d_statuses_i0_5Y_overall.rds')[1:4]
 ```
 
 ## Covariate Adder 
@@ -587,7 +593,7 @@ demo_covar_extractor <- function(input_tb, demo_cov, biomarker_name){
   output_tb[['age']] <- time_length(output_tb[[str_c(biomarker_name, '_measurement_datetime')]] - output_tb[['date_of_birth']], unit='year') #Compute the age at the most recent measurement of the biomarker
   
   print(nrow(output_tb))
-  print(sum(!is.na(output_tb$race) & !is.na(output_tb$bmi) & !is.na(output_tb$dbp)))
+  print(sum(!is.na(output_tb$race) & !is.na(output_tb$bmi) & !is.na(output_tb$dbp) & !is.na(output_tb$deprivation_index)))
   
   return(output_tb)
 }
@@ -628,6 +634,8 @@ genetic_ancest <- genetic_ancest %>%
   mutate(across(pc1:pc16, ~as.numeric(.)))
 saveRDS(genetic_ancest, 'DATA/all_geneticancest.rds')
 
+genetic_ancest <- readRDS('DATA/all_geneticancest.rds')
+
 #Add to each biomarker tb
 biomarker_diagnoses_demo2_lst <- map(biomarker_diagnoses_demo_lst, ~left_join(.,select(genetic_ancest, person_id=research_id, ancestry_pred, pc1:pc5),by='person_id'))
 
@@ -650,6 +658,62 @@ saveRDS(biomarker_diagnoses_demo2_lst, 'DATA/biomarker_diagnoses_demo2_lst.rds')
 biomarker_diagnoses_demo2_lst <- readRDS('DATA/biomarker_diagnoses_demo2_lst.rds')
 ```
 
+
+### eGFR/HDL/LDL Covariate Extractor
+
+This adds these 3 covariates using the nearest date to the chosen biomarker measurement.
+
+```{r}
+rcmm_covar_extractor <- function(input_tb, input_tb2, biomarker_name, biomarker_name2){ #Input_tb is the existing tb whereas input_tb2 is the new tb corresponding to creatinine or HDL or LDL
+  
+  print(biomarker_name)
+  
+  output_tb <- input_tb %>%
+  left_join(select(input_tb2, -operator_concept_name), by='person_id') %>%
+  group_by(person_id) %>%
+  filter(time_length(eval(parse(text=str_c(biomarker_name2,'_measurement_datetime'))) - eval(parse(text=str_c(biomarker_name,'_measurement_datetime')))) ==  #Filter for biomarker observation closest to the measurement datetime for biomarker of interest
+         min(time_length(eval(parse(text=str_c(biomarker_name2,'_measurement_datetime'))) - eval(parse(text=str_c(biomarker_name,'_measurement_datetime')))))
+         |is.na(str_c(biomarker_name2,'_measurement_datetime')) #This allows for rows which don't have the measurement or its datetime to be retained
+         )
+  
+  output_tb <- output_tb %>%
+    unique()  %>%
+    mutate(nresponses = sum(!is.na(eval(parse(text=biomarker_name2))))) %>%
+    filter(nresponses %in% c(0,1)) %>% #Remove those who have multiple observations at the same datetime
+    ungroup()
+  
+  if(biomarker_name2=='Creatinine'){
+      output_tb[['age_creatinine']] <- time_length(output_tb[['Creatinine_measurement_datetime']] - output_tb[['date_of_birth']], unit='year') #Compute the age at the most recent measurement of the biomarker
+      
+    output_tb <- output_tb %>%
+      filter(!is.na(Creatinine), Creatinine !=0) %>%
+      group_by(person_id) %>%
+       mutate(eGFR=case_when(sex_at_birth=='Female' ~ 142 * min(Creatinine/0.7, 1)^-0.241 * max(Creatinine/0.7,1)^-1.2 * 0.9938^age_creatinine * 1.012, 
+                                sex_at_birth=='Male' ~ 142*min(Creatinine/0.9,1)^-0.302 * max(Creatinine/0.9,1)^-1.2 * 0.9938^age_creatinine * 1,
+                             T~NA)) %>% 
+                ungroup() %>%
+ select(-age_creatinine, eGFR_estimation_datetime=Creatinine_measurement_datetime)
+
+  }
+  
+  return(output_tb)
+}
+
+#Run for each of the biomarkers, sequentially adding on each of eGFR; HDL and LDL
+
+biomarker_diagnoses_demo3_lst <- map2(biomarker_diagnoses_demo2_lst, names(biomarker_diagnoses_demo2_lst), 
+                                       ~rcmm_covar_extractor(.x, creatinine_hdl_ldl_cleaned[[1]],.y, biomarkers2[1]) %>%
+                                         rcmm_covar_extractor(creatinine_hdl_ldl_cleaned[[2]],.y, biomarkers2[2]) %>%
+                                         rcmm_covar_extractor(creatinine_hdl_ldl_cleaned[[3]],.y, biomarkers2[3])
+)
+
+saveRDS(biomarker_diagnoses_demo3_lst, 'DATA/biomarker_diagnoses_demo3_lst.rds')
+
+biomarker_diagnoses_demo3_lst <- readRDS('DATA/biomarker_diagnoses_demo3_lst.rds')
+```
+
+
+
 This evaluates how many non-NA individuals exist for any combination of covariates used.
 
 ```{r}
@@ -664,8 +728,12 @@ nonNA_checker <- function(input_tb, covariates_of_interest) {
   print(nrow(output_tb)) #Individuals with non-NA values in all of the covariates
 }
 
-walk(biomarker_diagnoses_demo2_lst, ~nonNA_checker(., c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp')))
-#For each of the biomarkers in biomarker_names
+#This is with the OG list of covariates + deprivation index
+walk(biomarker_diagnoses_demo2_lst, ~nonNA_checker(., c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index'))) #For each of the biomarkers in biomarker_names
+
+#This is with the RCMM expanded list of covariates including eGFR/HDL/LDL
+walk(biomarker_diagnoses_demo3_lst, ~nonNA_checker(., c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index', 'eGFR', 'HDL','LDL'))) #For each of the biomarkers in biomarker_names
+  
 ```
 
 ## Case-Control Analyses
@@ -684,7 +752,7 @@ limma_dpe <- function(input_tb, protein, predictor_vars='hcm', covars=c('age','s
   }
   
   #Separate into pheno_df for covariates and predictors and npx_df containing the NPX value for the protein over all individuals
-  pheno_df <- select(input_tb, all_of(predictor_vars),all_of(covars)) %>%
+  pheno_df <- select(input_tb, person_id, all_of(predictor_vars),all_of(covars)) %>%
     mutate(across(all_of(predictor_vars), ~factor(.))) %>%
     filter(if_all(covars, ~!is.na(.))) %>%#Filter for only rows with non-NA in all the covariates
     ungroup()
@@ -692,7 +760,7 @@ limma_dpe <- function(input_tb, protein, predictor_vars='hcm', covars=c('age','s
   print(sum(pheno_df[[predictor_vars]]==T)) #Number of cases
   print(sum(pheno_df[[predictor_vars]]==F)) #Number of controls
   
-  npx_df <- select(input_tb, !!sym(protein)) %>%
+  npx_df <- select(input_tb, person_id, !!sym(protein)) %>%
     filter(person_id %in% pheno_df$person_id) %>%
     ungroup()
   
@@ -768,9 +836,10 @@ summary_plotter_limma <- function(input_tb, output_label='aous_pp', predictor = 
     geom_vline(xintercept=0, linetype='dashed')+
     geom_point()+
     scale_colour_manual(name=ifelse(isFALSE(specific_label),'MTC Significant','PP of Interest'),values=c('FALSE'='grey','TRUE'='red'))+
-    geom_text_repel(aes(label=Label), nudge_y=15, max.overlaps=40)+
+    geom_text_repel(aes(label=Label), nudge_y=0, max.overlaps=40)+
     labs(col='Phenotype',shape='Predictor')+
     scale_x_continuous(n.breaks=10, limits=xlimits)+
+    # scale_y_continuous(expand=expansion(mult=c(0.05,0.5)))+
     xlab(xlabel)+
     ylab('-log10(p-value)')+
     labs(title=str_c('Summary plot of ', test,' tests for ',length(unique(input_tb$pp)), ' plasma proteins for ', predictor, ' predictor variable'))
@@ -820,7 +889,9 @@ This compares all HCM cases (including HF) with the non-HCM and HF controls.
 It iterates over each instance/timeframe from I0 to 5Y to overall.
 
 ```{r}
-hcm_all_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV'){ #This runs for each biomarker at a time
+rcmm_cov=T
+
+hcm_all_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV', rcmm_cov=T){ #This runs for each biomarker at a time
   
   test_tb <- input_tb  %>%
     mutate(hcm = case_when(eval(parse(text=str_c('hcm',instance, 'status',sep='_'))) == T ~ T, #HCM cases independent of HF status
@@ -828,16 +899,29 @@ hcm_all_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV'){ #This runs 
                            T~NA)) %>% #non-HCM and HF 
     filter(!is.na(hcm))
   
-  limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_')))
-  #Also prints the number of cases and controls (because the function also filters for all individuals with non-NA in the covariates)
+  if(isTRUE(rcmm_cov)){
+      limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_'), 'deprivation_index', 'eGFR', 'HDL','LDL'))
+  } else{
+      limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_')))
+  }
+
+ 
+   #Also prints the number of cases and controls (because the function also filters for all individuals with non-NA in the covariates)
   
   return(limma_obj)
 
 }
 
-hcm_all_vs_nonhcmhf_ov <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_all_vs_nonhcmhf(.x, .y)) %>% bind_rows()
-hcm_all_vs_nonhcmhf_i0 <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_all_vs_nonhcmhf(.x, .y, instance='i0')) %>% bind_rows()
-hcm_all_vs_nonhcmhf_5Y <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_all_vs_nonhcmhf(.x, .y, instance='5Y')) %>% bind_rows()
+if(isTRUE(rcmm_cov)){
+  test <- biomarker_diagnoses_demo3_lst
+} else{
+  test<- biomarker_diagnoses_demo2_lst #Technically this still has deprivation index
+}
+
+#With the expanded list of covariates use demo3_lst and otherwise use demo2_lst
+hcm_all_vs_nonhcmhf_ov <- map2(test, biomarker_names, ~hcm_all_vs_nonhcmhf(.x, .y,rcmm_cov=rcmm_cov)) %>% bind_rows()
+hcm_all_vs_nonhcmhf_i0 <- map2(test, biomarker_names, ~hcm_all_vs_nonhcmhf(.x, .y, instance='i0',rcmm_cov=rcmm_cov)) %>% bind_rows()
+hcm_all_vs_nonhcmhf_5Y <- map2(test, biomarker_names, ~hcm_all_vs_nonhcmhf(.x, .y, instance='5Y',rcmm_cov=rcmm_cov)) %>% bind_rows()
 
 hcm_all_vs_nonhcmhf_results <- list(
   hcm_all_vs_nonhcmhf_ov,
@@ -848,7 +932,7 @@ rm(hcm_all_vs_nonhcmhf_ov,
   hcm_all_vs_nonhcmhf_i0,
   hcm_all_vs_nonhcmhf_5Y)
 
-saveRDS(hcm_all_vs_nonhcmhf_results, 'OUTPUT/DATA/hcm_all_vs_nonhcmhf.rds')
+saveRDS(hcm_all_vs_nonhcmhf_results, ifelse(isTRUE(rcmm_cov),'OUTPUT/DATA/hcm_all_vs_nonhcmhf_rcmmcov.rds', 'OUTPUT/DATA/hcm_all_vs_nonhcmhf.rds'))
 ```
 
 This then plots the MTC-corrected volcano plots with all tests within the same instance.
@@ -879,7 +963,7 @@ walk2(hcm_all_vs_nonhcmhf_results, instances, ~perinstance_plotter(.x,.y))
 #### Non-HF HCM vs. Non-HF/HCM
 
 ```{r}
-hcm_nonhf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV'){ #This runs for each biomarker at a time
+hcm_nonhf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV', rcmm_cov=T){ #This runs for each biomarker at a time
   
   test_tb <- input_tb  %>%
     mutate(hcm = case_when(eval(parse(text=str_c('hcm',instance, 'status',sep='_'))) == T & eval(parse(text=str_c('hf',instance, 'status',sep='_'))) ==F ~ T, #Non-HF HCM cases
@@ -887,15 +971,19 @@ hcm_nonhf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV'){ #This run
                            T~NA)) %>% #HF and HCM patients
     filter(!is.na(hcm))
   
-  limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_')))
+    if(isTRUE(rcmm_cov)){
+      limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_'), 'deprivation_index', 'eGFR', 'HDL','LDL'))
+  } else{
+      limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_')))
+  }
   
   return(limma_obj)
 
 }
 
-hcm_nonhf_vs_nonhcmhf_ov <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_nonhf_vs_nonhcmhf(.x, .y)) %>% bind_rows()
-hcm_nonhf_vs_nonhcmhf_i0 <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_nonhf_vs_nonhcmhf(.x, .y, instance='i0')) %>% bind_rows()
-hcm_nonhf_vs_nonhcmhf_5Y <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_nonhf_vs_nonhcmhf(.x, .y, instance='5Y')) %>% bind_rows()
+hcm_nonhf_vs_nonhcmhf_ov <- map2(test, biomarker_names, ~hcm_nonhf_vs_nonhcmhf(.x, .y, rcmm_cov=rcmm_cov)) %>% bind_rows()
+hcm_nonhf_vs_nonhcmhf_i0 <- map2(test, biomarker_names, ~hcm_nonhf_vs_nonhcmhf(.x, .y, instance='i0', rcmm_cov=rcmm_cov)) %>% bind_rows()
+hcm_nonhf_vs_nonhcmhf_5Y <- map2(test, biomarker_names, ~hcm_nonhf_vs_nonhcmhf(.x, .y, instance='5Y', rcmm_cov=rcmm_cov)) %>% bind_rows()
 
 hcm_nonhf_vs_nonhcmhf_results <- list(
   hcm_nonhf_vs_nonhcmhf_ov,
@@ -907,7 +995,7 @@ rm(hcm_nonhf_vs_nonhcmhf_ov,
   hcm_nonhf_vs_nonhcmhf_i0,
   hcm_nonhf_vs_nonhcmhf_5Y)
 
-saveRDS(hcm_nonhf_vs_nonhcmhf_results , 'OUTPUT/DATA/hcm_nonhf_vs_nonhcmhf.rds')
+saveRDS(hcm_nonhf_vs_nonhcmhf_results , ifelse(isTRUE(rcmm_cov),'OUTPUT/DATA/hcm_nonhf_vs_nonhcmhf_rcmmcov.rds', 'OUTPUT/DATA/hcm_nonhf_vs_nonhcmhf.rds'))
 #Plot for each instance
 walk2(hcm_nonhf_vs_nonhcmhf_results, instances, ~perinstance_plotter(.x,.y, output_folder='HCM/exclHFcases'))
 ```
@@ -915,7 +1003,7 @@ walk2(hcm_nonhf_vs_nonhcmhf_results, instances, ~perinstance_plotter(.x,.y, outp
 #### HCM & HF vs. Non-HF/HCM
 
 ```{r}
-hcm_hf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV'){ #This runs for each biomarker at a time
+hcm_hf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV', rcmm_cov=T){ #This runs for each biomarker at a time
   
   test_tb <- input_tb  %>%
     mutate(hcm = case_when(eval(parse(text=str_c('hcm',instance, 'status',sep='_'))) == T & eval(parse(text=str_c('hf',instance, 'status',sep='_'))) ==T ~ T, #HF & HCM cases
@@ -923,15 +1011,19 @@ hcm_hf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV'){ #This runs f
                            T~NA)) %>% #HF patients without HCM or HCM patients without HF
     filter(!is.na(hcm))
   
-  limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_')))
+    if(isTRUE(rcmm_cov)){
+      limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_'), 'deprivation_index', 'eGFR', 'HDL','LDL'))
+  } else{
+      limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hcm', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_')))
+  }
   
   return(limma_obj)
 
 }
 
-hcm_hf_vs_nonhcmhf_ov <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_hf_vs_nonhcmhf(.x, .y)) %>% bind_rows()
-hcm_hf_vs_nonhcmhf_i0 <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_hf_vs_nonhcmhf(.x, .y, instance='i0')) %>% bind_rows()
-hcm_hf_vs_nonhcmhf_5Y <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~hcm_f_vs_nonhcmhf(.x, .y, instance='5Y')) %>% bind_rows()
+hcm_hf_vs_nonhcmhf_ov <- map2(test, biomarker_names, ~hcm_hf_vs_nonhcmhf(.x, .y, rcmm_cov=rcmm_cov)) %>% bind_rows()
+hcm_hf_vs_nonhcmhf_i0 <- map2(test, biomarker_names, ~hcm_hf_vs_nonhcmhf(.x, .y, instance='i0', rcmm_cov=rcmm_cov)) %>% bind_rows()
+hcm_hf_vs_nonhcmhf_5Y <- map2(test, biomarker_names, ~hcm_hf_vs_nonhcmhf(.x, .y, instance='5Y', rcmm_cov=rcmm_cov)) %>% bind_rows()
 
 
 hcm_hf_vs_nonhcmhf_results <- list(
@@ -944,17 +1036,16 @@ rm(hcm_hf_vs_nonhcmhf_ov,
   hcm_hf_vs_nonhcmhf_i0,
   hcm_hf_vs_nonhcmhf_5Y)
 
-saveRDS(hcm_hf_vs_nonhcmhf_results , 'OUTPUT/DATA/hcm_hf_vs_nonhcmhf.rds')
+saveRDS(hcm_hf_vs_nonhcmhf_results , ifelse(isTRUE(rcmm_cov),'OUTPUT/DATA/hcm_hf_vs_nonhcmhf_rcmmcov.rds','OUTPUT/DATA/hcm_hf_vs_nonhcmhf.rds'))
 #Plot for each instance
-walk2(hcm_hf_vs_nonhcmhf_results, instances, ~perinstance_plotter(.x,.y, output_folder='HCM/onlyHFcases')
-)
+walk2(hcm_hf_vs_nonhcmhf_results, instances, ~perinstance_plotter(.x,.y, output_folder='HCM/onlyHFcases'))
 
 ```
 
 #### Non-HCM HF vs. Non-HF/HCM
 
 ```{r}
-nonhcm_hf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV'){ #This runs for each biomarker at a time
+nonhcm_hf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV',rcmm_cov=T){ #This runs for each biomarker at a time
   
   test_tb <- input_tb  %>%
     mutate(hf = case_when(eval(parse(text=str_c('hcm',instance, 'status',sep='_'))) == F & eval(parse(text=str_c('hf',instance, 'status',sep='_'))) ==T ~ T, #Non-HCM HF cases
@@ -962,15 +1053,19 @@ nonhcm_hf_vs_nonhcmhf <- function(input_tb, biomarker, instance='OV'){ #This run
                            T~NA)) %>% #HF patients with HCM or HCM patients without HF
     filter(!is.na(hf))
   
-  limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hf', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_')))
+    if(isTRUE(rcmm_cov)){
+      limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hf', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_'), 'deprivation_index', 'eGFR', 'HDL','LDL'))
+  } else{
+      limma_obj<- limma_dpe(test_tb,biomarker, predictor_vars='hf', covars=c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp',str_c('t2d', instance,'status',sep='_')))
+  }
   
   return(limma_obj)
 
 }
 
-nonhcm_hf_vs_nonhcmhf_ov <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~nonhcm_hf_vs_nonhcmhf(.x, .y)) %>% bind_rows()
-nonhcm_hf_vs_nonhcmhf_i0 <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~nonhcm_hf_vs_nonhcmhf(.x, .y, instance='i0')) %>% bind_rows()
-nonhcm_hf_vs_nonhcmhf_5Y <- map2(biomarker_diagnoses_demo2_lst, biomarker_names, ~nonhcm_f_vs_nonhcmhf(.x, .y, instance='5Y')) %>% bind_rows()
+nonhcm_hf_vs_nonhcmhf_ov <- map2(test, biomarker_names, ~nonhcm_hf_vs_nonhcmhf(.x, .y, rcmm_cov=rcmm_cov)) %>% bind_rows()
+nonhcm_hf_vs_nonhcmhf_i0 <- map2(test, biomarker_names, ~nonhcm_hf_vs_nonhcmhf(.x, .y, instance='i0', rcmm_cov=rcmm_cov)) %>% bind_rows()
+nonhcm_hf_vs_nonhcmhf_5Y <- map2(test, biomarker_names, ~nonhcm_hf_vs_nonhcmhf(.x, .y, instance='5Y', rcmm_cov=rcmm_cov)) %>% bind_rows()
 
 
 nonhcm_hf_vs_nonhcmhf_results <- list(
@@ -978,7 +1073,7 @@ nonhcm_hf_vs_nonhcmhf_results <- list(
   nonhcm_hf_vs_nonhcmhf_i0,
   nonhcm_hf_vs_nonhcmhf_5Y)
 
-saveRDS(nonhcm_hf_vs_nonhcmhf_results , 'OUTPUT/DATA/nonhcm_hf_vs_nonhcmhf.rds')
+saveRDS(nonhcm_hf_vs_nonhcmhf_results , ifelse(isTRUE(rcmm_cov), 'OUTPUT/DATA/nonhcm_hf_vs_nonhcmhf_rcmmcov.rds','OUTPUT/DATA/nonhcm_hf_vs_nonhcmhf.rds'))
 
 rm(nonhcm_hf_vs_nonhcmhf_ov,
   nonhcm_hf_vs_nonhcmhf_i0,
@@ -1073,13 +1168,50 @@ write_tsv(regenie_pp,'DATA/pp_regenie_pheno.tsv')
 
 ```
 
+I also discreetly prepare the phenotype and covariate files for a HCM case-control GWAS.
+
+```{r}
+regenie_cov2 <- select(genetic_ancest, person_id=research_id,pc1:pc10) %>%
+  left_join(select(demo_cov, person_id, sex=sex_at_birth, date_of_birth), by='person_id') %>%
+  left_join(htwt_measurements, by='person_id')
+
+#For their age, I take their age at the cutoff of the most recent CDR i.e V7 = 07/01/22 
+#This would be the last date that individuals could be diagnosed with HCM and still be considered a case in the AoUS dataset.
+
+regenie_cov2 <- regenie_cov2 %>%
+  mutate(age = time_length(as_date('2022-07-01')-as_date(date_of_birth), unit='year')) %>%
+  select(-date_of_birth)
+
+
+#Final formatting
+regenie_cov2 <- regenie_cov2 %>%
+  mutate(FID=person_id, IID=person_id) %>%
+  select(FID, IID, everything()) %>%
+  select(-person_id)
+
+#This has covariates of 10PCs; age; sex; ht; wt.
+write_tsv(regenie_cov2,'DATA/hcm_regenie_cov.tsv')
+
+#Output case-control status by 1 = case 0 = control
+regenie_hcm <- select(genetic_ancest, person_id=research_id) %>%
+  mutate(hcm=ifelse(person_id %in% diagnoses_cleaned[['hcm']]$person_id, T,F)) %>%
+  mutate(FID=person_id, IID=person_id) %>%
+  select(FID, IID, everything()) %>%
+  select(-person_id)
+
+write_tsv(regenie_hcm,'DATA/hcm_regenie_pheno.tsv')
+
+```
+
+
 # Upload to Bucket
 
 This uploads all the files in the PP folder to the GCP Bucket.
 
 ```{r}
 
-system('gsutil cp -m -r ~/rstudio/PP/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/' )
+system('gsutil -m cp -r ~/rstudio/PP/DATA/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
+system('gsutil -m cp -r ~/rstudio/PP/OUTPUT/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
 
 ```
 
