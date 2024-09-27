@@ -32,6 +32,7 @@ task plink_prep_step1{ #This performs QC and extracts the LD-pruned SNPs
 
     runtime{
         docker: "us.gcr.io/broad-dsp-gcr-public/terra-jupyter-aou:2.2.14" #This is the Docker image containing plink
+        disks: 1000 #1000 GB
     }
 
 
@@ -75,6 +76,7 @@ task regenie_step1{ #This runs the first step of the regenie analysis i.e ridge 
     runtime{
         docker: "us-central1-docker.pkg.dev/all-of-us-rw-prod/aou-rw-gar-remote-repo-docker-prod/skoyamamd/regenie_3.4.1:latest"
         cpu: 4
+        disks: 1000 #1000 GB
         
     }
 
@@ -117,6 +119,7 @@ task regenie_step2{ #This runs the second step i.e linear regression to test ind
     runtime{
         docker: "us-central1-docker.pkg.dev/all-of-us-rw-prod/aou-rw-gar-remote-repo-docker-prod/skoyamamd/regenie_3.4.1:latest"
         cpu: 4
+        disks: 1000 #1000 GB
     }
 }
 
