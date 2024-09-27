@@ -177,17 +177,11 @@ get_ipython().system('pip install git+https://github.com/broadinstitute/cromshel
 get_ipython().system('cromshell version')
 
 
-# In[5]:
-
-
-get_ipython().system('cromshell validate --help')
-
-
 # ## Load WDL and JSON Files 
 # 
 # This step uses your WDL file and json file to define the inputs into WDL workflow.
 
-# In[6]:
+# In[8]:
 
 
 # Import your WDL script
@@ -229,6 +223,7 @@ task plink_prep_step1{ #This performs QC and extracts the LD-pruned SNPs
 
     runtime{
         docker: "us.gcr.io/broad-dsp-gcr-public/terra-jupyter-aou:2.2.14" #This is the Docker image containing plink
+        disks: 1000 #1000 GB
     }
 
 
@@ -272,6 +267,7 @@ task regenie_step1{ #This runs the first step of the regenie analysis i.e ridge 
     runtime{
         docker: "us-central1-docker.pkg.dev/all-of-us-rw-prod/aou-rw-gar-remote-repo-docker-prod/skoyamamd/regenie_3.4.1:latest"
         cpu: 4
+        disks: 1000 #1000 GB
         
     }
 
@@ -314,6 +310,7 @@ task regenie_step2{ #This runs the second step i.e linear regression to test ind
     runtime{
         docker: "us-central1-docker.pkg.dev/all-of-us-rw-prod/aou-rw-gar-remote-repo-docker-prod/skoyamamd/regenie_3.4.1:latest"
         cpu: 4
+        disks: 1000 #1000 GB
     }
 }
 
@@ -358,6 +355,9 @@ workflow regenie_aous{ #This runs the entire workflow for all the chromosomes
 
     }
 }
+
+
+
 
 """
 fp = open(wdl_filename, 'w')
@@ -418,16 +418,23 @@ fp.write(json_content)
 fp.close()
 
 
+# In[9]:
+
+
+#Validate the WDL and its input json file
+get_ipython().system('cromshell validate regenie_aous_pp.wdl regenie_aous_ntprobnp.json')
+
+
 # ## WDL Execution via Cromshell
 
-# In[49]:
+# In[10]:
 
 
 ##Submit the regenie_aous_pp.wdl to Cromwell
 get_ipython().system('cromshell submit regenie_aous_pp.wdl regenie_aous_ntprobnp.json')
 
 
-# In[50]:
+# In[11]:
 
 
 ## Check submission ID
@@ -440,21 +447,21 @@ submission_id = most_recent_submission[2]
 print(submission_id)
 
 
-# In[51]:
+# In[12]:
 
 
 #Check status of submission to Cromwell
 get_ipython().system('cromshell status $submission_id')
 
 
-# In[53]:
+# In[13]:
 
 
 #Upload this script 
 # get the bucket name
 my_bucket = os.getenv('WORKSPACE_BUCKET')
 
-# copy csv file to the bucket
+# copy notebook file to the bucket
 args = ["gsutil", "cp", f"./1_REGENIE_WDL_PP.ipynb", f"{my_bucket}/PP/GWAS/"]
 output = subprocess.run(args, capture_output=True)
 
@@ -462,7 +469,7 @@ output = subprocess.run(args, capture_output=True)
 output.stderr
 
 
-# In[ ]:
+# In[15]:
 
 
 #This function checks the status of the Cromwell job submission
@@ -498,4 +505,31 @@ def check_job_status(submission_id):
 
 # Call the function to check the job status
 check_job_status(submission_id)
+
+
+# ## Check Output + Debug
+# 
+# By default, the output files will be in the GCP Bucket under /cromwell_executions/.
+# 
+# You can browse the files via gsutil ls or cp etc.
+
+# In[16]:
+
+
+#This provides the metadata for the job run
+get_ipython().system('cromshell metadata $submission_id')
+
+
+# In[55]:
+
+
+#Get the submission log
+get_ipython().system('cromshell logs -s ALL $submission_id')
+
+
+# In[ ]:
+
+
+#Get the outputs from the job run
+get_ipython().system('cromshell list-outputs $submission_id')
 
