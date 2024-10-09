@@ -92,7 +92,7 @@ rm(ukb_20240209_baseline_cmr,ukb_cases, ukb_20240209_pp_i0, ukb_20240209_snptest
 #Query for HCM cases
 print(str_c('There are ',nrow(filter(ukb_20240209_baseline_cmr_pp, hcm==T)),' HCM cases in this intersection between CMR and PP in UKB'))
 
-ukb_20240209_baseline_cmr_pp_excludeHCM <- filter(ukb_20240209_baseline_cmr_pp, hcm==F) 
+ukb_20240209_baseline_cmr_pp_excludeHCM <- filter(ukb_20240209_baseline_cmr_pp, hcm==F)  #Exclude HCM individuals
 rm(ukb_20240209_baseline_cmr_pp)
 
 #This adds in extra columns that I would like e.g LVMASSI
