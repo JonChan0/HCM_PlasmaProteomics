@@ -292,8 +292,7 @@ if(isTRUE(rcmm_cov)){
   covariates <- c('sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','smoking','t2d')
 }
 
-pp <- c('ntprobnp','hrc') #For Instance 0
-# pp <- c('ntprobnp','ace2') # For 5Y cases
+pp <- c('ntprobnp','hrc') 
 statuses <- c('vacomp_status','hfcomp_status','overallcomp_status')
 surv_ages <- c('vacomp_age','hfcomp_age','overallcomp_age')
 
@@ -383,24 +382,24 @@ multivariate_cox <- function(input_tb, marginal_predictor, covariates, status, o
     return(multivariate_cox)
   }
   
-  if(isFALSE(return_predictor_results_only)){
+  if(isFALSE(return_predictor_results_only)){ 
   
-  p.value<-signif(x$coef[1:nrow(x$coef),5], digits=3)
-  beta<-signif(x$coef[1:nrow(x$coef),1], digits=3);#coeficient beta
-  HR <-signif(x$coef[1:nrow(x$coef),2], digits=3);#exp(beta) = hazard ratio
-  HR.confint.lower <- signif(x$conf.int[,"lower .95"], 3)
-  HR.confint.upper <- signif(x$conf.int[,"upper .95"],3)
-  se_beta <- signif(x$coef[1:nrow(x$coef),3], digits=3)
-  vars <- rownames(x$coef)
+    p.value<-signif(x$coef[1:nrow(x$coef),5], digits=3)
+    beta<-signif(x$coef[1:nrow(x$coef),1], digits=3);#coeficient beta
+    HR <-signif(x$coef[1:nrow(x$coef),2], digits=3);#exp(beta) = hazard ratio
+    HR.confint.lower <- signif(x$conf.int[,"lower .95"], 3)
+    HR.confint.upper <- signif(x$conf.int[,"upper .95"],3)
+    se_beta <- signif(x$coef[1:nrow(x$coef),3], digits=3)
+    vars <- rownames(x$coef)
+  } else{ #This only works if single marginal predictor
     
-  } else{
-      p.value<-signif(x$coef[nrow(x$coef),5], digits=3)
-  beta<-signif(x$coef[nrow(x$coef),1], digits=3);#coeficient beta
-  HR <-signif(x$coef[nrow(x$coef),2], digits=3);#exp(beta) = hazard ratio
-  HR.confint.lower <- signif(x$conf.int[,"lower .95"][nrow(x$coef)], 3)
-  HR.confint.upper <- signif(x$conf.int[,"upper .95"][nrow(x$coef)],3)
-  se_beta <- signif(x$coef[nrow(x$coef),3], digits=3)
-  vars <- rownames(x$coef)[nrow(x$coef)]
+    p.value<-signif(x$coef[nrow(x$coef),5], digits=3)
+    beta<-signif(x$coef[nrow(x$coef),1], digits=3);#coeficient beta
+    HR <-signif(x$coef[nrow(x$coef),2], digits=3);#exp(beta) = hazard ratio
+    HR.confint.lower <- signif(x$conf.int[,"lower .95"][nrow(x$coef)], 3)
+    HR.confint.upper <- signif(x$conf.int[,"upper .95"][nrow(x$coef)],3)
+    se_beta <- signif(x$coef[nrow(x$coef),3], digits=3)
+    vars <- rownames(x$coef)[nrow(x$coef)]
 
   }
   
@@ -435,18 +434,35 @@ multivariate_cox_models <- c(
   map(pp, ~multivariate_cox(ukb_tb,.,covariates,statuses[3],surv_ages[3], return_model=T))
 )
 names(multivariate_cox_models) <-(expand_grid(pp,surv_ages) %>% mutate(surv_ages = factor(surv_ages, levels=c('vacomp_age','hfcomp_age','overallcomp_age'))) %>% arrange(surv_ages) %>% mutate(name = str_c(pp, surv_ages, sep='_x_')))$name
-
-#Run joint Cox regression models (i.e all plasma proteins modelled together)
-#Evaluate pairwise correlation between NTproBNP and HRC
-cor(ukb_tb$ntprobnp, ukb_tb$hrc, method='spearman', use='pairwise.complete.obs') #0.6 correlation so Cox regression not suitable model for such collinearity
-cor(ukb_tb$ntprobnp, ukb_tb$ace2, method='spearman', use='pairwise.complete.obs')
-
-
 ```
 Try with only HRC x AF outcome.
 
 ```{r}
 multivariate_cox(input_tb = ukb_tb, marginal_predictor = 'hrc',covariates = covariates,status = 'af_status',outcome_var = 'af_age',outcome_levels = 'AF')
+```
+
+#### Joint Multivariate Cox
+```{r}
+#Run joint Cox regression models (i.e all plasma proteins modelled together)
+#Evaluate pairwise correlation between NTproBNP and HRC
+cor(ukb_tb$ntprobnp, ukb_tb$hrc, method='spearman', use='pairwise.complete.obs') #0.6 correlation so some degree of multicollinearity so should be ok
+# cor(ukb_tb$ntprobnp, ukb_tb$ace2, method='spearman', use='pairwise.complete.obs')
+
+joint_cox_results <- bind_rows(
+  multivariate_cox(ukb_tb,pp,covariates,statuses[1],surv_ages[1], return_predictor_results_only = F),
+  multivariate_cox(ukb_tb,pp,covariates,statuses[2],surv_ages[2], return_predictor_results_only = F),
+  multivariate_cox(ukb_tb,pp,covariates,statuses[3],surv_ages[3], return_predictor_results_only = F)
+) %>%
+  bind_rows() %>%
+  filter(!is.na(p.value)) %>%
+  filter(var %in% pp)
+
+joint_cox_model_overallcomp <- multivariate_cox(ukb_tb,pp,covariates,statuses[3],surv_ages[3], return_model=T)
+ntprobnp_model_overallcomp <- multivariate_cox(filter(ukb_tb, !is.na(hrc)),'ntprobnp',covariates,statuses[3],surv_ages[3], return_model=T) #Need to fit to the same dataset size for ANOVA
+
+anova(ntprobnp_model_overallcomp, joint_cox_model_overallcomp) #ANOVA of the two models to see if the added model explains greater variance than the previous model with just NTproBNP
+
+
 ```
 
 
@@ -456,7 +472,7 @@ Now plot a summary plot of the results for each predictor.
 
 ```{r multivariate_cox_plotter, fig.width=9, fig.height=6, message=F,warning=F}
 
-multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, FDR=5){
+multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, selected_vars = c('ntprobnp','hrc'),FDR=5, xlim=c(0,20), ylim=c(0,7)){
   
   if (!is.numeric(FDR)){ #Apply Bonferroni
     pval_threshold = 0.05/nrow(multivariate_results)
@@ -466,21 +482,25 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
     pval_threshold <- FDR/100
     mtc <- str_c('FDR ',FDR, '%',sep='')
   }
+  
+  multivariate_results <- multivariate_results %>%
+    filter(var %in% selected_vars)
 
   multivariate_plot <- ggplot(multivariate_results, aes(HR,-log10(p.value)))+
-    geom_vline(xintercept=1, linetype='dashed',alpha=0.5)+
     geom_hline(yintercept=-log10(pval_threshold), linetype='dashed', alpha=0.5)+
-    geom_point(aes(col=predictor, shape=outcome),alpha=0.75)+
-    geom_errorbarh(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor, shape=outcome),alpha=0.75, height=0.1)+
-    geom_text_repel(aes(label=HR))+
+    geom_point(aes(col=predictor, shape=outcome),alpha=0.75, size=3)+
+    geom_errorbarh(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor, shape=outcome),alpha=0.75, height=0.2)+
+    geom_vline(xintercept=1, linetype='dashed',alpha=0.5)+
+    # geom_text_repel(aes(label=HR))+
     scale_colour_brewer(name='Predictor',palette='Dark2')+
     scale_shape_discrete(name='Outcome')+
     xlab('Hazard Ratio')+
     ylab(ifelse(mtc=='Bonferroni','-log10 (Wald-test p value)', '-log10 (Adjusted Wald-test p value)'))+
-    scale_x_continuous(n.breaks=10)+
+    scale_x_continuous(n.breaks=10, limits=xlim, expand = expansion(0,0))+
+    scale_y_continuous(limits=ylim, expand = expansion(0,0))+
     labs(title=str_wrap(str_c('Multivariate Cox Regression analysis for ', nrow(multivariate_results), ' tests')),caption=str_c(mtc, ' p-value Threshold Indicated; Error Bars = 95% CI'))+
-    theme(legend.position="bottom")+
-     guides(col=guide_legend(nrow=1, byrow=TRUE)) 
+    theme(legend.position="right")
+  # +   guides(col=guide_legend(nrow=1, byrow=TRUE)) 
   
   print(multivariate_plot)
   ggsave(str_c(plot_output_path, 'cox_multivariate_', output_name,'.png'), dpi=600, width=9, height=6)
@@ -494,8 +514,13 @@ if(isTRUE(rcmm_cov)){
   str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/2_COXPH/',instance,'/')
 }
 
+multivariate_cox_results <- multivariate_cox_results %>%
+  mutate(predictor = factor(predictor, levels=c('NTPROBNP','HRC')))
+
+multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_alloutcomes_fdr5', selected_vars=c('ntprobnp'))
+multivariate_coxph_plotter(multivariate_cox_results,path, 'hrc_alloutcomes_fdr5', selected_vars=c('hrc'))
 multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_hrc_alloutcomes_fdr5')
-multivariate_coxph_plotter(multivariate_cox_results, path, 'ntprobnp_hrc_alloutcomes_bonferroni', FDR=F)
+multivariate_coxph_plotter(multivariate_cox_results, path, 'ntprobnp_hrc_alloutcomes_bonferroni', FDR=F, ylim=c(0,8))
 
 ```
 ### Cox Assumptions
