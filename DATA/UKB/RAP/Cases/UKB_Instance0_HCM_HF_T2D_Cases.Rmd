@@ -43,8 +43,12 @@ t2d_diag_tb <- read_tsv('ukb_T2D_20240209_icd10_icd9_selfrep_diagdates.tsv') #47
 ```
 
 ```{r}
-attendance_date <- read_tsv('../../../../../../HCM_Severity/DATASETS/UKB/RAP/Outcomes/Processed/allukb_outcome_dates.tsv') %>%
-  select(ID, contains('attend'))
+# attendance_date <- read_tsv('../../../../../../HCM_Severity/DATASETS/UKB/RAP/Outcomes/Processed/allukb_outcome_dates.tsv') %>%
+#   select(ID, contains('attend'))
+
+bcollection_date <- read_tsv('2024_02_09_allUKB_BloodCollection_Time.tsv')%>%
+  dplyr::rename(ID=eid, bcollection_date_i0=p21842_i0) %>%
+  mutate(bcollection_date_i0=as_date(bcollection_date_i0))
 ```
 ## Filter Self-Reported Individuals
 
@@ -208,7 +212,7 @@ hf_tb <- select(hf_diag_tb, ID=eid, firstocc_hf=p131354) %>%
   ungroup() %>%
   mutate(min_diag_date=as_date(ifelse(is.infinite(min_diag_date),NA, min_diag_date))) %>%
   select(ID, min_diag_date) %>%
-  left_join(attendance_date, by='ID')
+  left_join(bcollection_date, by='ID')
 
 
 t2d_tb <- select(t2d_diag_tb, ID=eid, firstocc_t2d=p130708) %>%
@@ -219,7 +223,7 @@ t2d_tb <- select(t2d_diag_tb, ID=eid, firstocc_t2d=p130708) %>%
   ungroup() %>%
   mutate(min_diag_date=as_date(ifelse(is.infinite(min_diag_date),NA, min_diag_date))) %>%
   select(ID, min_diag_date) %>%
-  left_join(attendance_date, by='ID')
+  left_join(bcollection_date, by='ID')
 ```
 
 
@@ -229,7 +233,7 @@ This merges the self-reported interpolated year with the hospital-diagnosed date
 
 ```{r}
 hcm_tb <- left_join(hcm_selfrep, hcm_hospdiag, by='ID') %>%
-  left_join(attendance_date, by='ID') %>%
+  left_join(bcollection_date, by='ID') %>%
     rowwise() %>%
     mutate(min_diag_date = min(c_across(2:4),na.rm=T)) %>% #Assume that columns 2 to 4 are the diagnosis dates (self-reported; ICD10 and ICD9)
     mutate(min_diag_date = as_date(ifelse(is.infinite(min_diag_date),NA,min_diag_date)))
@@ -242,10 +246,10 @@ hcm_tb <- left_join(hcm_selfrep, hcm_hospdiag, by='ID') %>%
 This provides the IDs of the individuals who were diagnosed with their disease prior to their first attendance at the assessment centre (i.e had one of the 3 dates before their initial assessment date).
 
 ```{r warnings=F}
-i0_extractor <- function(input_tb, output_name, output_folder='../../PROCESSED/'){
+i0_extractor <- function(input_tb, output_name, threshold_date='bcollection_date_i0',output_folder='../../PROCESSED/'){
   
   output_tb <- input_tb %>%
-    mutate(i0_case= ifelse(min_diag_date <= date_attend_i0, T,F))
+    mutate(i0_case= ifelse(min_diag_date <= eval(parse(text=threshold_date)), T,F))
     
   print(str_c('There are',nrow(filter(output_tb, is.na(min_diag_date))), output_name, 'cases in the UKB who have NA value for diagnosis date', sep=' ' ))
   print(str_c('There are',nrow(filter(output_tb, i0_case==T)), output_name, 'cases in the UKB who were diagnosed with disease prior to instance 0 of attending assessment centre', sep=' ' ))
@@ -298,11 +302,11 @@ i0_death_tbs <- map2(i0_tbs, list('I42.1|I42.2','I50.0|I50.1|I50.9','E11'),
 
 ```{r}
 #This extracts and writes out the IDs of patients who satisfy the 5Y criteria
-fiveyear_extractor <- function(input_tb, output_name, output_folder='../../PROCESSED/'){
+fiveyear_extractor <- function(input_tb, output_name, threshold_date='bcollection_date_i0', output_folder='../../PROCESSED/'){
   
   output_tb <- input_tb %>%
-    mutate(fiveyear_case = ifelse(time_length(min_diag_date - date_attend_i0, unit='year') <= 5 |  #Assign 5Y status if their minimum date of diagnosis was within 5 years after attendance. NB This includes i0 cases because they have a time_length of negative because min_diag_Date < date_attend_i0
-                                    time_length(death_date - date_attend_i0, unit='year') <=5, T,F)) #OR if they had mention of death with ICD10 code of interest & died within 5 years of attendance
+    mutate(fiveyear_case = ifelse(time_length(min_diag_date - eval(parse(text=threshold_date)), unit='year') <= 5 |  #Assign 5Y status if their minimum date of diagnosis was within 5 years after attendance. NB This includes i0 cases because they have a time_length of negative because min_diag_Date < date_attend_i0
+                                    time_length(death_date - eval(parse(text=threshold_date)), unit='year') <=5, T,F)) #OR if they had mention of death with ICD10 code of interest & died within 5 years of attendance
     
   print(str_c('There are',nrow(filter(output_tb, fiveyear_case==T)), output_name, 'cases in the UKB who satisfy 5Y criteria', sep=' ' ))
   
