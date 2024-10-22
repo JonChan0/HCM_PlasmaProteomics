@@ -1291,3 +1291,18 @@ Note that `test.tsv` is just to shorten the filename to enable import.
 # pp_vs_hcm_rarepos_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm_rarepos, 'allpp_vs_hcm_rarepos',predictor = 'Rare status',output_path='PLOTS/UKB/1_Case_vs_Control/2_Limma/HCM_RarePos/') 
 ```
 
+##Pairwise-Correlation Analysis with NTproBNP
+
+This evaluates multicollinearity via evaluation of all biomarker's pairwise correlation with NTproBNP (prior to transformation btw).
+
+```{r}
+pp <- colnames(ukb_proteomics_data)[-1]
+
+pearson_pairwise_ntprobnp<- map(pp, ~cor(ukb_proteomics_data[[.]], ukb_proteomics_data$ntprobnp, use='pairwise.complete.obs')) 
+names(pearson_pairwise_ntprobnp) <- pp
+
+pearson_pairwise_ntprobnp <- pearson_pairwise_ntprobnp %>%
+  bind_rows() %>%
+  pivot_longer(everything(), names_to='pp', values_to='r')
+```
+

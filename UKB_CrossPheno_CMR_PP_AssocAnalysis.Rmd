@@ -28,7 +28,7 @@ Specifically, it looks at the associations between CMR measures and plasma prote
 # Import
 
 ```{r import_cmr}
-ukb_cases <- read_tsv('DATA/UKB/RAP/ukb_rap_HCM_20240209.csv') %>%
+ukb_cases <- read_tsv('DATA/UKB/RAP/Cases/ukb_rap_HCM_20240209.csv') %>%
   dplyr::rename(ID=1)
 
 ukb_20240209_baseline_cmr <- read_tsv('../../HCM_IntScore/ukb_sets/rap/cohort_tsvs/2024_02_09_CMR_PPsubset/20240209_age_sex_bmi_CMR_PPsubset.tsv') %>%
@@ -51,7 +51,7 @@ rm(test)
 ```
 
 ```{r import_pp}
-ukb_20240209_pp_i0 <- read_tsv('DATA/UKB/RAP/ukb_allpp_i0.tsv')%>%
+ukb_20240209_pp_i0 <- read_tsv('DATA/UKB/RAP/PP/ukb_allpp_i0.tsv')%>%
   select(-`...1`) %>%
   select(contains('instance_0')) %>% #It contains some instance 2 columns for some reason
   rename_with(~str_match(.,'\\.(.+)')[,2]) %>%
@@ -532,6 +532,8 @@ pp <- c('NTproBNP','MMP1','IL1RL1','LGALS3',
 
 # pp <- c('FABP3','SHISA5','MAMDC2','LTBP2') #This is for part 2
 
+# pp <- c('ANGPT2', 'STC2') #This is for part 3
+
 ukb_20240209_select_pp <- ukb_20240209_pp_i0 %>%
   select(ID=eid,all_of(str_to_lower(pp))) %>%
   filter(if_any(str_to_lower(pp),~!is.na(.)))
@@ -699,6 +701,12 @@ ukb_pp_noharper_regenie_inclHCM<- regenie_pheno_covar_prep(ukb_20240209_pp_gwas_
 # ukb_pp_noharper_regenie_inclHCM<- regenie_pheno_covar_prep(ukb_20240209_pp_gwas_filtered,
 #                                                        pp,
 #                                                        '../../EDA_HCMR/popgen/2_gwas/data/ukb/REGENIE/2_inclHCMcases/part2/',
+#                                                        '../../EDA_HCMR/popgen/2_gwas/data/ukb/ukb11223_imp_chr22_v3_s487324.sample', hcm_filter='hcm_keep')
+
+#This is for part3 i.e the 2 extra pp of STC2 and ANGPT2
+# ukb_pp_noharper_regenie_inclHCM<- regenie_pheno_covar_prep(ukb_20240209_pp_gwas_filtered,
+#                                                        pp,
+#                                                        '../../EDA_HCMR/popgen/2_gwas/data/ukb/REGENIE/2_inclHCMcases/part3/',
 #                                                        '../../EDA_HCMR/popgen/2_gwas/data/ukb/ukb11223_imp_chr22_v3_s487324.sample', hcm_filter='hcm_keep')
 
 #Only HCM cases
