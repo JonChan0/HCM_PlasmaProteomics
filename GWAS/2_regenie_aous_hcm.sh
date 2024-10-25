@@ -19,6 +19,7 @@ regenie \
     --catCovarList sex \
     --covarColList "age,ht,wt,pc1,pc2,pc3,pc4,pc5,pc6,pc7,pc8,pc9,pc10" \
     --bsize 1000 \
+    --force-step1 \
     --extract "${step1_snplist}" \
     --verbose \
     --"${trait}" \
@@ -37,6 +38,7 @@ regenie \
     --pred "${pheno}"_step1_chr"${chrom}"_pred.list \
     --bsize 1000 \
     --minMAC 50 \
+    --firth --approx \
     --verbose \
     --"${trait}" \
     --ref-first \
