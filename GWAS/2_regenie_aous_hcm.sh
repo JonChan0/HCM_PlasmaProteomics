@@ -16,13 +16,12 @@ regenie \
     --phenoFile "${pheno_file}" \
     --phenoCol "${pheno}" \
     --covarFile "${cov_file}" \
-    --catCovarList "sex" \
-    --covarColList "ht,wt,pc1,pc2,pc3,pc4,pc5,pc6,pc7,pc8,pc9,pc10,age_${pheno}" \
+    --catCovarList sex \
+    --covarColList "age,ht,wt,pc1,pc2,pc3,pc4,pc5,pc6,pc7,pc8,pc9,pc10" \
     --bsize 1000 \
     --extract "${step1_snplist}" \
     --verbose \
     --"${trait}" \
-    --apply-rint \
     --ref-first \
     --out "${pheno}"_step1_chr"${chrom}"
 
@@ -33,14 +32,13 @@ regenie \
     --phenoFile "${pheno_file}" \
     --phenoCol "${pheno}" \
     --covarFile "${cov_file}" \
-    --catCovarList "sex" \
-    --covarColList "ht,wt,pc1,pc2,pc3,pc4,pc5,pc6,pc7,pc8,pc9,pc10,age_${pheno}" \
+    --catCovarList sex \
+    --covarColList "age,ht,wt,pc1,pc2,pc3,pc4,pc5,pc6,pc7,pc8,pc9,pc10" \
     --pred "${pheno}"_step1_chr"${chrom}"_pred.list \
     --bsize 1000 \
     --minMAC 50 \
     --verbose \
     --"${trait}" \
-    --apply-rint \
     --ref-first \
     --out "${pheno}"_step2_chr"${chrom}"
 
