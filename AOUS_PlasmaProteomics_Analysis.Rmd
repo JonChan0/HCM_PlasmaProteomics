@@ -32,8 +32,22 @@ read_bq_export_from_workspace_bucket <- function(export_path) {
           chunk
         }))
 }
-```
 
+read_rds_from_workspace_bucket <- function(export_path) {
+  col_types <- cols(standard_concept_name = col_character(), standard_concept_code = col_character(), standard_vocabulary = col_character(), measurement_type_concept_name = col_character(), operator_concept_name = col_character(), value_as_concept_name = col_character(), unit_concept_name = col_character(), visit_occurrence_concept_name = col_character(), measurement_source_value = col_character(), source_concept_name = col_character(), source_concept_code = col_character(), source_vocabulary = col_character(), unit_source_value = col_character(), value_source_value = col_character())
+  
+  bind_rows(
+    map(system2('gsutil', args = c('ls', export_path), stdout = TRUE, stderr = TRUE),
+        function(csv) {
+          message(str_glue('Loading {csv}.'))
+          chunk <- readRDS(pipe(str_glue('gsutil cat {csv}')), col_types = col_types, show_col_types = FALSE)
+          if (is.null(col_types)) {
+            col_types <- spec(chunk)
+          }
+          chunk
+        }))
+}
+```
 
 This dataset is as per V7 of the Controlled Tier btw!
 
@@ -44,6 +58,8 @@ demographics_cleaned <- read_bq_export_from_workspace_bucket('gs://fc-secure-795
   filter(sex_at_birth %in% c('Male','Female'))  #Filter for those who define their sex
 
 cardio_biomarkers <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240911/measurement_95445965/measurement_95445965_*.csv')
+
+has_ehr_data <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20241128/person_22340851/person_22340851_*.csv')
 
 hcm_diagnoses <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240911/condition_93004727/condition_93004727_*.csv')
 
@@ -95,6 +111,9 @@ condition_names <- c('hcm','hf','t2d')
 diagnoses_cleaned <- map2(list(hcm_diagnoses, hf_diagnoses, t2d_diagnoses), condition_names, ~diagnosis_object_cleaner(.x,.y))
 names(diagnoses_cleaned) <- condition_names
 rm(hcm_diagnoses, hf_diagnoses, t2d_diagnoses)
+
+#Filter the all_disease_conditions to unique person_ids
+disease_conditions_nonNA_personIDs <- all_disease_conditions$person_id %>% unique() #250233 individuals
 ```
 
 ### Observations Transformation/Cleaning
@@ -313,6 +332,7 @@ label_tb <- tribble(
 
 ```
 
+### RDS 
 ```{r}
 #Save RDS objects for reimport
 
@@ -330,6 +350,22 @@ diagnoses_cleaned <- readRDS('DATA/all_hcm_hf_t2d_diag.rds')
 smoking_cleaned <- readRDS('DATA/all_smoking.rds')
 cardio_biomarkers_cleaned <- readRDS('DATA/all_pp.rds')
 creatinine_hdl_ldl_cleaned <- readRDS('DATA/all_creatinine_hdl_ldl.rds')
+
+#If importing from Bucket
+bucket_rds_importer <- function(basepath, filename){
+  system2('gsutil', args=c('cp',str_c(basepath,filename), ' ./'))
+  
+  if (str_detect(filename, 'rds')){
+    output <- readRDS(filename)
+  } else if (str_detect(filename, 'tsv')){
+    output <- read_tsv(filename)
+  }
+  
+}
+
+bucket_basepath <- 'gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/'
+demo_cov <- bucket_rds_importer(bucket_basepath,'all_demo_bmi_dbp_deprivation.rds')
+diagnoses_cleaned <- bucket_rds_importer(bucket_basepath,'all_hcm_hf_t2d_diag.rds')
 ```
 
 ## EDA
@@ -635,6 +671,9 @@ genetic_ancest <- genetic_ancest %>%
 saveRDS(genetic_ancest, 'DATA/all_geneticancest.rds')
 
 genetic_ancest <- readRDS('DATA/all_geneticancest.rds')
+
+#Or import from Cloud Bucket
+genetic_ancest <- bucket_rds_importer(str_c(bucket_basepath, 'all_geneticancest.rds'),'all_geneticancest.rds')
 
 #Add to each biomarker tb
 biomarker_diagnoses_demo2_lst <- map(biomarker_diagnoses_demo_lst, ~left_join(.,select(genetic_ancest, person_id=research_id, ancestry_pred, pc1:pc5),by='person_id'))
@@ -1182,10 +1221,13 @@ regenie_cov2 <- regenie_cov2 %>%
   mutate(age = time_length(as_date('2022-07-01')-as_date(date_of_birth), unit='year')) %>%
   select(-date_of_birth)
 
+#I also filter here for only individuals who have EHR data
+regenie_cov2 <- regenie_cov2 %>%
+  filter(person_id %in% has_ehr_data$person_id) #Drops around 40k individuals
 
 #Final formatting
 regenie_cov2 <- regenie_cov2 %>%
-  mutate(FID=person_id, IID=person_id) %>%
+  mutate(FID=0, IID=person_id) %>% #Set FID=0 for AoUS
   select(FID, IID, everything()) %>%
   select(-person_id)
 
@@ -1194,8 +1236,9 @@ write_tsv(regenie_cov2,'DATA/hcm_regenie_cov.tsv')
 
 #Output case-control status by 1 = case 0 = control
 regenie_hcm <- select(genetic_ancest, person_id=research_id) %>%
+  filter(person_id %in% has_ehr_data$person_id) %>% #Filter for only those who have EHR data
   mutate(hcm=ifelse(person_id %in% diagnoses_cleaned[['hcm']]$person_id, T,F)) %>%
-  mutate(FID=person_id, IID=person_id) %>%
+  mutate(FID=0, IID=person_id) %>% #Set FID=0 for AoUS
   select(FID, IID, everything()) %>%
   select(-person_id)
 
@@ -1212,6 +1255,80 @@ This uploads all the files in the PP folder to the GCP Bucket.
 
 system('gsutil -m cp -r ~/rstudio/PP/DATA/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
 system('gsutil -m cp -r ~/rstudio/PP/OUTPUT/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
+
+```
+
+# EDA of HCM Cases vs. Controls
+
+This performs some EDA of the age and sex distributions of the cases & controls in the EHR-positive, srWGS dataset.
+
+```{r}
+library(MatchIt)
+
+#Import from bucket
+regenie_hcm <- bucket_rds_importer(bucket_basepath, 'hcm_regenie_pheno.tsv')
+regenie_cov2 <- bucket_rds_importer(bucket_basepath, 'hcm_regenie_cov.tsv')
+
+hcm_cases <- filter(regenie_hcm, hcm==T) %>% select(IID)
+age_sex_hcm_cases_controls <- regenie_cov2 %>% select(IID, sex, age) %>%
+  mutate(hcm = ifelse(IID %in% hcm_cases$IID, T,F)) %>%
+  filter(!is.na(age) & !is.na(sex))
+
+#Evaluate initial imbalance
+init <- matchit(hcm ~ age + sex, data = age_sex_hcm_cases_controls,
+                 method = NULL, distance = "glm")
+
+summary(init)
+
+plot(init, type = "density", interactive = FALSE,
+     which.xs = ~age +sex)
+```
+This shows that the initial imbalance is age-skewed with greater average age for cases cf. controls and slightly different sex distribution as well.
+
+`The standardized mean differences (Std. Mean Diff.), variance ratios (Var. Ratio), and empirical cumulative distribution function (eCDF) statistics. Values of standardized mean differences and eCDF statistics close to zero and values of variance ratios close to one indicate good balance`.
+
+The density graphs also show this (black= cases, grey = controls).
+
+```{r}
+age_sex_matcher <- function(input_tb, case_control_ratio = 40, plot_output_path='~/'){
+  
+  matched <- matchit(hcm ~ age + sex, data = input_tb,
+                 method = 'nearest', distance = "glm", ratio=case_control_ratio)
+  
+  sink(str_c(plot_output_path, 'case_control_ratio_',case_control_ratio, '.txt'))
+  print(summary(matched))
+  sink()
+
+  png(str_c(plot_output_path, 'age_sex_matched_glm_nearest_ratio', case_control_ratio,'.png'))
+  plot(matched, type = "density", interactive = FALSE,
+     which.xs = ~age +sex)
+  dev.off()
+  
+  return(matched)
+}
+
+matched_list <- map(c(40,100,200), ~age_sex_matcher(age_sex_hcm_cases_controls, case_control_ratio=.))
+
+print(summary(matched_list[[3]]))
+
+# plot(matched_list[[3]], type = "jitter", interactive = FALSE)
+```
+
+Now extracting the matched controls to the cases for a ratio of 200 (because it performs well)
+
+```{r}
+matched_cases_controls <- match.data(matched_list[[3]])
+
+matched_regenie_pheno <- regenie_hcm %>%
+  filter(IID %in% matched_cases_controls$IID)
+
+matched_regenie_cov <- regenie_cov2 %>%
+  filter(IID %in% matched_cases_controls$IID)
+
+write_tsv(matched_regenie_pheno, 'hcm_regenie_pheno_agesexmatched200.tsv')
+write_tsv(matched_regenie_cov, 'hcm_regenie_cov_agesexmatched200.tsv')
+
+system('gsutil cp hcm_regenie_pheno_agesexmatched200.tsv hcm_regenie_cov_agesexmatched200.tsv -t gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/' )
 
 ```
 
