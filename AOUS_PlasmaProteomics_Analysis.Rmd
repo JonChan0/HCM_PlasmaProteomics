@@ -169,7 +169,7 @@ rm(dbp_measurements)
 ## Separate out assays based on enzymatic activity
 
 biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_interest, 
-                              # upper_limit, 
+                              upper_limit,
                               chosen_conc_unit='ng/mL',molar_mass=NA ){#For creatinine
   
   filtered_tb <- input_tb %>%
@@ -247,7 +247,7 @@ biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_intere
     select(person_id, operator_concept_name, value_as_number, measurement_datetime) %>%
     mutate(operator_concept_name = ifelse(operator_concept_name=='No matching concept'|is.na(operator_concept_name), '=', operator_concept_name)) %>%  #If no operator given, assume =
     filter(value_as_number >= 0) %>% #Filter out negative values for concentration
-    # filter(value_as_number < upper_limit) %>% #Deprecated filtering
+    filter(value_as_number < upper_limit) %>% 
     mutate(measurement_datetime=as_datetime(measurement_datetime)) 
   
   colnames(output_tb)[3] <- colname_of_interest
@@ -262,11 +262,11 @@ biomarkers <- c('Natriuretic peptide B','Natriuretic peptide.B prohormone N-Term
 biomarker_names <- c('NPPB','NTproBNP','TNNI3','TNNT2'
                      #,'BAP'
                      )
-# upper_limits <- c(200,1000,5000,1000
-                  #,1000
-                  # ) #This defines the upper limit for cutoff in ng/mL for each biomarker based on EDA of the transformed values = DEPRECATED as of 23/12/2024 due to implementation of 3SD cutoff instead
+upper_limits <- c(2000,2000,2000,2000 #Use 2000 ng/mL as default upper cutoff due to generally assay limit around that concentration
+# ,1000
+  ) #This defines the upper limit for cutoff in ng/mL for each biomarker based on EDA of the transformed values
 
-cardio_biomarkers_cleaned <- pmap(list(biomarkers, biomarker_names), ~biomarker_cleaner(cardio_biomarkers, ..1,..2))
+cardio_biomarkers_cleaned <- pmap(list(biomarkers, biomarker_names, upper_limits), ~biomarker_cleaner(cardio_biomarkers, ..1,..2, ..3))
 names(cardio_biomarkers_cleaned) <- biomarker_names
 
 # rm(cardio_biomarkers)
@@ -280,6 +280,7 @@ biomarker_outlier_eda <- function(biomarker_name, input_tb, hcm_tb, n_sd=3){
   print(str_c('Running outlier EDA for ', biomarker_name))
   
   upper_thresh <- mean(input_tb[[biomarker_name]]) + n_sd * sd(input_tb[[biomarker_name]])
+  print(signif(upper_thresh),3)
   
   outliers <- input_tb %>%
     filter(eval(parse(text=biomarker_name)) > upper_thresh)
@@ -306,7 +307,7 @@ biomarker_outlier_eda <- function(biomarker_name, input_tb, hcm_tb, n_sd=3){
   print(str_c('There are', n_hcm_nonoutliers ,'HCM cases with', biomarker_name, '<= mean + 3SD and', n_hcm_outliers , 'HCM cases as outliers i.e > mean + 3SD', sep=' '))
   
   print(str_c('HCM outlier/total HCM ratio = ', n_hcm_outliers/(n_hcm_outliers + n_hcm_nonoutliers)))
-  print(str_c('NonHCM outlier/total nonHCM ratio = ', n_outliers/(n_outliers + n_nonoutliers), '\n'))
+  print(str_c('NonHCM outlier/total nonHCM ratio = ', n_outliers/(n_outliers + n_nonoutliers)))
   
   output_tb <- input_tb %>%
     filter(eval(parse(text=biomarker_name)) <= upper_thresh)
@@ -508,7 +509,7 @@ walk(c(3,5,7), ~single_col_dist_plotter(demo_cov, .,label_tb,save=T))
 #This is for the biomarkers
 ##N.B I assume that the > and < operators are ~ =. This assumes that those individuals above/below the limit of detection have measures of their limits i.e bias towards the median as opposed to the ground truth.
 
-walk(cardio_biomarkers_cleaned, ~single_col_dist_plotter(., 3, label_tb, save=T))
+walk(cardio_biomarkers_cleaned_sdfiltered, ~single_col_dist_plotter(., 3, label_tb, save=T))
 walk(creatinine_hdl_ldl_cleaned, ~single_col_dist_plotter(., 3, label_tb, save=T))
 
 ```
@@ -633,10 +634,11 @@ biomarker_diagnoses_formatter <- function(biomarker_tb, diagnoses_list){
 #For each biomarker of interest, it computes the I0/5Y/Overall disease status for diseases inputted via diagnoses_list for those individuals with measurements given the relative dates of their most recent biomarker measurement and the respective date of diagnosis for each disease of interest.
 
 names(diagnoses_cleaned) <- condition_names
-biomarker_diagnoses_list <- map(cardio_biomarkers_cleaned, ~biomarker_diagnoses_formatter(.,diagnoses_cleaned))
+biomarker_diagnoses_list <- map(cardio_biomarkers_cleaned_sdfiltered, ~biomarker_diagnoses_formatter(.,diagnoses_cleaned))
 saveRDS(biomarker_diagnoses_list, 'DATA/biomarker_list_hcm_hf_t2d_statuses_i0_5Y_overall.rds')
 
 biomarker_diagnoses_list <- readRDS('DATA/biomarker_list_hcm_hf_t2d_statuses_i0_5Y_overall.rds')[1:4]
+#Filter out BAP
 ```
 
 ## Covariate Adder 
@@ -688,6 +690,7 @@ demo_covar_extractor <- function(input_tb, demo_cov, biomarker_name){
 }
 
 biomarker_diagnoses_demo_lst <- map2(biomarker_diagnoses_list, biomarker_names, ~demo_covar_extractor(.x, demo_cov, .y))
+names(biomarker_diagnoses_demo_lst) <- biomarker_names
 saveRDS(biomarker_diagnoses_demo_lst, 'DATA/biomarker_diagnoses_demo_lst.rds')
 
 # biomarker_diagnoses_demo_lst <- readRDS('DATA/biomarker_diagnoses_demo_lst.rds')
@@ -745,9 +748,10 @@ i0_5y_na_toF <- function(input_tb){
 }
 
 biomarker_diagnoses_demo2_lst <- map(biomarker_diagnoses_demo2_lst, ~i0_5y_na_toF(.))
+names(biomarker_diagnoses_demo2_lst) <- biomarker_names
 saveRDS(biomarker_diagnoses_demo2_lst, 'PP/DATA/biomarker_diagnoses_demo2_lst.rds')
 
-biomarker_diagnoses_demo2_lst <- readRDS('PP/DATA/biomarker_diagnoses_demo2_lst.rds')
+# biomarker_diagnoses_demo2_lst <- readRDS('PP/DATA/biomarker_diagnoses_demo2_lst.rds')
 ```
 
 
@@ -801,7 +805,7 @@ biomarker_diagnoses_demo3_lst <- map2(biomarker_diagnoses_demo2_lst, names(bioma
 
 saveRDS(biomarker_diagnoses_demo3_lst, 'PP/DATA/biomarker_diagnoses_demo3_lst.rds')
 
-biomarker_diagnoses_demo3_lst <- readRDS('PP/DATA/biomarker_diagnoses_demo3_lst.rds')
+# biomarker_diagnoses_demo3_lst <- readRDS('PP/DATA/biomarker_diagnoses_demo3_lst.rds')
 ```
 
 
@@ -964,7 +968,7 @@ summary_plotter_limma <- function(input_tb, output_label='aous_pp', predictor = 
     geom_text_repel(aes(label=Label))+
     labs(x = "Log10(Mean Normalised NPX)", y = xlabel) +
     scale_colour_manual(name='MTC Significant',values=c('FALSE'='grey','TRUE'='red'))+
-    labs(title=str_c('MA plot for ', test, ' in UKB plasma proteins CM panel'))
+    labs(title=str_c('MA plot for ', test))
 
   print(ma_plot)
   ggsave(str_c(output_path,output_label,'_ma_plot_',pval,'.png'),ma_plot,dpi=600, width=9, height=6)
@@ -1229,7 +1233,7 @@ for (i in seq_along(biomarker_diagnoses_demo2_lst)){
 #Final formatting
 
 regenie_cov <- regenie_cov %>%
-  mutate(FID=person_id, IID=person_id) %>%
+  mutate(FID=0, IID=person_id) %>%
   select(FID, IID, everything()) %>%
   select(-person_id)
 
@@ -1252,7 +1256,7 @@ for (i in seq_along(biomarker_diagnoses_demo2_lst)){
 #Final formatting
 
 regenie_pp <- regenie_pp %>%
-  mutate(FID=person_id, IID=person_id) %>%
+  mutate(FID=0, IID=person_id) %>%
   select(FID, IID, everything()) %>%
   select(-person_id)
 
@@ -1306,8 +1310,8 @@ This uploads all the files in the PP folder to the GCP Bucket.
 
 ```{r}
 
-system('gsutil -m cp -r ~/PP/DATA/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
-system('gsutil -m cp -r ~/PP/OUTPUT/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
+system('gsutil -m cp -r ~/DATA/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
+system('gsutil -m cp -r ~/OUTPUT/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/')
 
 ```
 
