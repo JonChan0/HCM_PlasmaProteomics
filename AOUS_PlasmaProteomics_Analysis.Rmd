@@ -168,7 +168,9 @@ rm(dbp_measurements)
 ## Merge across blood/serum/plasma based measurements
 ## Separate out assays based on enzymatic activity
 
-biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_interest, upper_limit, chosen_conc_unit='ng/mL',molar_mass=NA ){#For creatinine
+biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_interest, 
+                              # upper_limit, 
+                              chosen_conc_unit='ng/mL',molar_mass=NA ){#For creatinine
   
   filtered_tb <- input_tb %>%
     filter(str_detect(standard_concept_name, biomarker_of_interest)) %>%
@@ -245,7 +247,7 @@ biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_intere
     select(person_id, operator_concept_name, value_as_number, measurement_datetime) %>%
     mutate(operator_concept_name = ifelse(operator_concept_name=='No matching concept'|is.na(operator_concept_name), '=', operator_concept_name)) %>%  #If no operator given, assume =
     filter(value_as_number >= 0) %>% #Filter out negative values for concentration
-    filter(value_as_number < upper_limit) %>% #Filter only for values below the upper limit
+    # filter(value_as_number < upper_limit) %>% #Deprecated filtering
     mutate(measurement_datetime=as_datetime(measurement_datetime)) 
   
   colnames(output_tb)[3] <- colname_of_interest
@@ -260,15 +262,63 @@ biomarkers <- c('Natriuretic peptide B','Natriuretic peptide.B prohormone N-Term
 biomarker_names <- c('NPPB','NTproBNP','TNNI3','TNNT2'
                      #,'BAP'
                      )
-upper_limits <- c(200,1000,5000,1000,1000) #This defines the upper limit for cutoff in ng/mL for each biomarker based on EDA of the transformed values
+# upper_limits <- c(200,1000,5000,1000
+                  #,1000
+                  # ) #This defines the upper limit for cutoff in ng/mL for each biomarker based on EDA of the transformed values = DEPRECATED as of 23/12/2024 due to implementation of 3SD cutoff instead
 
-cardio_biomarkers_cleaned <- pmap(list(biomarkers, biomarker_names, upper_limits), ~biomarker_cleaner(cardio_biomarkers, ..1,..2,..3))
+cardio_biomarkers_cleaned <- pmap(list(biomarkers, biomarker_names), ~biomarker_cleaner(cardio_biomarkers, ..1,..2))
 names(cardio_biomarkers_cleaned) <- biomarker_names
 
-rm(cardio_biomarkers)
+# rm(cardio_biomarkers)
+```
+
+I also perform some additional EDA on the outlier filtering using upper limit on the biomarkers.
+
+```{r}
+biomarker_outlier_eda <- function(biomarker_name, input_tb, hcm_tb, n_sd=3){
+  
+  print(str_c('Running outlier EDA for ', biomarker_name))
+  
+  upper_thresh <- mean(input_tb[[biomarker_name]]) + n_sd * sd(input_tb[[biomarker_name]])
+  
+  outliers <- input_tb %>%
+    filter(eval(parse(text=biomarker_name)) > upper_thresh)
+  
+  non_outliers <- input_tb %>%
+    filter(eval(parse(text=biomarker_name)) <= upper_thresh)
+  
+  n_nonoutliers <- length(unique(non_outliers$person_id))
+  n_outliers <- length(unique(outliers$person_id))
+  
+  #How many of the entire datsaet are outliers
+  print(str_c('There are', n_nonoutliers,'total individuals with', biomarker_name, '<= mean + 3SD and', n_outliers , 'total individuals as outliers i.e > mean + 3SD', sep=' '))
+  
+    outliers <- outliers %>%
+      filter(person_id %in% hcm_tb$person_id)
+  
+  non_outliers <- non_outliers %>%
+    filter(person_id %in% hcm_tb$person_id )
+  
+  n_hcm_nonoutliers<-length(unique(non_outliers$person_id))
+  n_hcm_outliers <- length(unique(outliers$person_id))
+  
+    #How many of the HCM cases in the dataset are outliers
+  print(str_c('There are', n_hcm_nonoutliers ,'HCM cases with', biomarker_name, '<= mean + 3SD and', n_hcm_outliers , 'HCM cases as outliers i.e > mean + 3SD', sep=' '))
+  
+  print(str_c('HCM outlier/total HCM ratio = ', n_hcm_outliers/(n_hcm_outliers + n_hcm_nonoutliers)))
+  print(str_c('NonHCM outlier/total nonHCM ratio = ', n_outliers/(n_outliers + n_nonoutliers), '\n'))
+  
+  output_tb <- input_tb %>%
+    filter(eval(parse(text=biomarker_name)) <= upper_thresh)
+  
+  return(output_tb)
+}
+
+cardio_biomarkers_cleaned_sdfiltered <- map2(biomarker_names, cardio_biomarkers_cleaned, ~biomarker_outlier_eda(.x,.y, diagnoses_cleaned[['hcm']]))
 ```
 
 Also clean the creatinine; HDL; LDL measurements.
+This uses the arbitrary cutoff values via the elbow method upon visualisation of distribution.
 
 ```{r}
 biomarkers2 <- c('Creatinine', 'HDL','LDL')
@@ -339,7 +389,8 @@ label_tb <- tribble(
 saveRDS(demo_cov, 'DATA/all_demo_bmi_dbp_deprivation.rds')
 saveRDS(diagnoses_cleaned, 'DATA/all_hcm_hf_t2d_diag.rds')
 saveRDS(smoking_cleaned, 'DATA/all_smoking.rds')
-saveRDS(cardio_biomarkers_cleaned, 'DATA/all_pp.rds')
+# saveRDS(cardio_biomarkers_cleaned, 'DATA/all_pp.rds')
+saveRDS(cardio_biomarkers_cleaned_sdfiltered, 'DATA/all_pp_sdfiltered.rds')
 saveRDS(creatinine_hdl_ldl_cleaned, 'DATA/all_creatinine_hdl_ldl.rds')
 ```
 
@@ -348,7 +399,7 @@ saveRDS(creatinine_hdl_ldl_cleaned, 'DATA/all_creatinine_hdl_ldl.rds')
 demo_cov <- readRDS('DATA/all_demo_bmi_dbp_deprivation.rds')
 diagnoses_cleaned <- readRDS('DATA/all_hcm_hf_t2d_diag.rds')
 smoking_cleaned <- readRDS('DATA/all_smoking.rds')
-cardio_biomarkers_cleaned <- readRDS('DATA/all_pp.rds')
+cardio_biomarkers_cleaned_sdfiltered <- readRDS('DATA/all_pp_sdfiltered.rds')
 creatinine_hdl_ldl_cleaned <- readRDS('DATA/all_creatinine_hdl_ldl.rds')
 
 #If importing from Bucket
@@ -365,7 +416,10 @@ bucket_rds_importer <- function(basepath, filename){
 
 bucket_basepath <- 'gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/'
 demo_cov <- bucket_rds_importer(bucket_basepath,'all_demo_bmi_dbp_deprivation.rds')
+cardio_biomarkers_cleaned_sdfiltered <- bucket_rds_importer(bucket_basepath,'all_pp_sdfiltered.rds')
 diagnoses_cleaned <- bucket_rds_importer(bucket_basepath,'all_hcm_hf_t2d_diag.rds')
+creatinine_hdl_ldl_cleaned <- bucket_rds_importer(bucket_basepath,'all_creatinine_hdl_ldl.rds')
+smoking_cleaned <- bucket_rds_importer(bucket_basepath,'all_smoking.rds')
 ```
 
 ## EDA
@@ -379,11 +433,10 @@ length(unique(smoking_cleaned$person_id))
 
 walk(diagnoses_cleaned, ~print(length(unique(.[['person_id']])))) #HCM/HF/T2D
 
-walk(cardio_biomarkers_cleaned, ~print(length(unique(.[['person_id']])))) #NPPB/NTproBNP/TnI/TnT/BAP
+walk(cardio_biomarkers_cleaned_sdfiltered, ~print(length(unique(.[['person_id']])))) #NPPB/NTproBNP/TnI/TnT/BAP
 
 walk(creatinine_hdl_ldl_cleaned, ~print(length(unique(.[['person_id']])))) #Creatinine/HDL/LDL
 ```
-
 
 ### Continuous Variable EDA
 
@@ -673,7 +726,7 @@ saveRDS(genetic_ancest, 'DATA/all_geneticancest.rds')
 genetic_ancest <- readRDS('DATA/all_geneticancest.rds')
 
 #Or import from Cloud Bucket
-genetic_ancest <- bucket_rds_importer(str_c(bucket_basepath, 'all_geneticancest.rds'),'all_geneticancest.rds')
+genetic_ancest <- bucket_rds_importer(bucket_basepath, 'all_geneticancest.rds')
 
 #Add to each biomarker tb
 biomarker_diagnoses_demo2_lst <- map(biomarker_diagnoses_demo_lst, ~left_join(.,select(genetic_ancest, person_id=research_id, ancestry_pred, pc1:pc5),by='person_id'))
@@ -692,9 +745,9 @@ i0_5y_na_toF <- function(input_tb){
 }
 
 biomarker_diagnoses_demo2_lst <- map(biomarker_diagnoses_demo2_lst, ~i0_5y_na_toF(.))
-saveRDS(biomarker_diagnoses_demo2_lst, 'DATA/biomarker_diagnoses_demo2_lst.rds')
+saveRDS(biomarker_diagnoses_demo2_lst, 'PP/DATA/biomarker_diagnoses_demo2_lst.rds')
 
-biomarker_diagnoses_demo2_lst <- readRDS('DATA/biomarker_diagnoses_demo2_lst.rds')
+biomarker_diagnoses_demo2_lst <- readRDS('PP/DATA/biomarker_diagnoses_demo2_lst.rds')
 ```
 
 
@@ -746,9 +799,9 @@ biomarker_diagnoses_demo3_lst <- map2(biomarker_diagnoses_demo2_lst, names(bioma
                                          rcmm_covar_extractor(creatinine_hdl_ldl_cleaned[[3]],.y, biomarkers2[3])
 )
 
-saveRDS(biomarker_diagnoses_demo3_lst, 'DATA/biomarker_diagnoses_demo3_lst.rds')
+saveRDS(biomarker_diagnoses_demo3_lst, 'PP/DATA/biomarker_diagnoses_demo3_lst.rds')
 
-biomarker_diagnoses_demo3_lst <- readRDS('DATA/biomarker_diagnoses_demo3_lst.rds')
+biomarker_diagnoses_demo3_lst <- readRDS('PP/DATA/biomarker_diagnoses_demo3_lst.rds')
 ```
 
 
@@ -1253,8 +1306,8 @@ This uploads all the files in the PP folder to the GCP Bucket.
 
 ```{r}
 
-system('gsutil -m cp -r ~/rstudio/PP/DATA/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
-system('gsutil -m cp -r ~/rstudio/PP/OUTPUT/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
+system('gsutil -m cp -r ~/PP/DATA/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
+system('gsutil -m cp -r ~/PP/OUTPUT/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
 
 ```
 
@@ -1270,9 +1323,12 @@ regenie_hcm <- bucket_rds_importer(bucket_basepath, 'hcm_regenie_pheno.tsv')
 regenie_cov2 <- bucket_rds_importer(bucket_basepath, 'hcm_regenie_cov.tsv')
 
 hcm_cases <- filter(regenie_hcm, hcm==T) %>% select(IID)
-age_sex_hcm_cases_controls <- regenie_cov2 %>% select(IID, sex, age) %>%
-  mutate(hcm = ifelse(IID %in% hcm_cases$IID, T,F)) %>%
-  filter(!is.na(age) & !is.na(sex))
+age_sex_hcm_cases_controls <- regenie_cov2 %>%
+  filter(if_all(everything(), ~!is.na(.))) %>%  #Filter only for those with non-NA in covariates
+  select(IID, sex, age) %>%
+  mutate(hcm = ifelse(IID %in% hcm_cases$IID, 1,0)) %>%
+  filter(!is.na(age) & !is.na(sex))%>%
+    mutate(hcm=factor(hcm, levels=c(0,1), labels=c('Control','Case')))
 
 #Evaluate initial imbalance
 init <- matchit(hcm ~ age + sex, data = age_sex_hcm_cases_controls,
@@ -1282,6 +1338,26 @@ summary(init)
 
 plot(init, type = "density", interactive = FALSE,
      which.xs = ~age +sex)
+
+#Plot initial imbalance plots
+age_dist <- ggplot(age_sex_hcm_cases_controls)+
+  geom_density(aes(x=age, fill=hcm),alpha=0.5)
+print(age_dist)
+ggsave('nomatch_agedist.png',age_dist,dpi=600)
+
+sex_dist_tb<- age_sex_hcm_cases_controls%>%
+    group_by(sex, hcm) %>%
+    summarise(count = n()) %>%
+    group_by(hcm) %>%
+    mutate(proportion = count / sum(count))
+
+#Plot sex distributions in ggplot2
+sex_dist <- ggplot(sex_dist_tb , aes(x = hcm, y = proportion, fill = sex)) +
+  geom_bar(stat = "identity", position = "fill") 
+print(sex_dist)
+ggsave('nomatch_sexdist.png',sex_dist,dpi=600)
+
+system('gsutil cp nomatch_* gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
 ```
 This shows that the initial imbalance is age-skewed with greater average age for cases cf. controls and slightly different sex distribution as well.
 
@@ -1295,29 +1371,46 @@ age_sex_matcher <- function(input_tb, case_control_ratio = 40, plot_output_path=
   matched <- matchit(hcm ~ age + sex, data = input_tb,
                  method = 'nearest', distance = "glm", ratio=case_control_ratio)
   
-  sink(str_c(plot_output_path, 'case_control_ratio_',case_control_ratio, '.txt'))
-  print(summary(matched))
-  sink()
-
-  png(str_c(plot_output_path, 'age_sex_matched_glm_nearest_ratio', case_control_ratio,'.png'))
-  plot(matched, type = "density", interactive = FALSE,
-     which.xs = ~age +sex)
-  dev.off()
+  # sink(str_c(plot_output_path, 'case_control_ratio_',case_control_ratio, '.txt'))
+  # print(summary(matched))
+  # sink()
+  # 
+  # png(str_c(plot_output_path, 'age_sex_matched_glm_nearest_ratio', case_control_ratio,'.png'))
+  # plot(matched, type = "density", interactive = FALSE,
+  #    which.xs = ~age +sex)
+  # dev.off()
+  
+  matched_cases_controls <- match.data(matched)
+  
+  #Plot age distributions in ggplot2
+  age_dist <- ggplot(matched_cases_controls)+
+    geom_density(aes(x=age, fill=hcm),alpha=0.5)
+  
+  print(age_dist)
+  ggsave(str_c(plot_output_path, 'age_sex_matched_glm_nearest_ratio', case_control_ratio,'_agedist.png'),age_dist,dpi=600)
+  
+  sex_dist_tb<- matched_cases_controls %>%
+      group_by(sex, hcm) %>%
+      summarise(count = n()) %>%
+      group_by(hcm) %>%
+      mutate(proportion = count / sum(count))
+  
+  #Plot sex distributions in ggplot2
+  sex_dist <- ggplot(sex_dist_tb , aes(x = hcm, y = proportion, fill = sex)) +
+    geom_bar(stat = "identity", position = "fill") 
+  print(sex_dist)
+    ggsave(str_c(plot_output_path, 'age_sex_matched_glm_nearest_ratio', case_control_ratio,'_sexdist.png'),sex_dist,dpi=600)
   
   return(matched)
 }
 
-matched_list <- map(c(40,100,200), ~age_sex_matcher(age_sex_hcm_cases_controls, case_control_ratio=.))
-
-print(summary(matched_list[[3]]))
-
-# plot(matched_list[[3]], type = "jitter", interactive = FALSE)
+matched_list <- map(c(40,100,200,250), ~age_sex_matcher(age_sex_hcm_cases_controls, case_control_ratio=.))
 ```
 
 Now extracting the matched controls to the cases for a ratio of 200 (because it performs well)
 
 ```{r}
-matched_cases_controls <- match.data(matched_list[[3]])
+matched_cases_controls <- match.data(matched_list[[2]])
 
 matched_regenie_pheno <- regenie_hcm %>%
   filter(IID %in% matched_cases_controls$IID)
@@ -1325,10 +1418,13 @@ matched_regenie_pheno <- regenie_hcm %>%
 matched_regenie_cov <- regenie_cov2 %>%
   filter(IID %in% matched_cases_controls$IID)
 
-write_tsv(matched_regenie_pheno, 'hcm_regenie_pheno_agesexmatched200.tsv')
-write_tsv(matched_regenie_cov, 'hcm_regenie_cov_agesexmatched200.tsv')
+write_tsv(matched_regenie_pheno, 'hcm_regenie_pheno_agesexmatched100.tsv')
+write_tsv(matched_regenie_cov, 'hcm_regenie_cov_agesexmatched100.tsv')
 
-system('gsutil cp hcm_regenie_pheno_agesexmatched200.tsv hcm_regenie_cov_agesexmatched200.tsv -t gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/' )
+system('gsutil cp hcm_regenie_pheno_agesexmatched100.tsv hcm_regenie_cov_agesexmatched100.tsv -t gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/' )
+
+system('gsutil -m cp age_sex_matched_glm_* gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
+
 
 ```
 
