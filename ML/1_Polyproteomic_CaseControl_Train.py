@@ -27,7 +27,7 @@ def get_model_and_params(model_type):
             'classifier__C': [0.1, 1, 10],
             'classifier__class_weight': ['balanced']
         }
-    elif model_type == 'random_forest':
+    elif model_type in ['random_forest', 'random_forest_no_fs']:
         model = RandomForestClassifier()
         param_grid = {
             'classifier__n_estimators': [100, 200],
