@@ -84,7 +84,7 @@ def train_model(model, param_grid, model_name, folder_path):
         ])
 
  # Define the feature selection step if not L1 logistic regression
-    if model_name != 'l1_logistic_regression':
+    if model_name not in ['l1_logistic_regression', 'random_forest_no_fs']:
         feature_selection = SelectPercentile(score_func=f_classif, percentile=1)
         pipeline_steps = [
             ('preprocessor', preprocessor),
@@ -92,8 +92,8 @@ def train_model(model, param_grid, model_name, folder_path):
             ('classifier', model)
         ]
     else:
-        print("Skipping feature selection for L1 logistic regression.")
-        wandb.log({"status": "Skipping feature selection for L1 logistic regression"})
+        print(f"Skipping feature selection for {model_name}.")
+        wandb.log({"status": f"Skipping feature selection for {model_name}"})
         pipeline_steps = [
             ('preprocessor', preprocessor),
             ('classifier', model)
