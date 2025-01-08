@@ -316,9 +316,6 @@ if __name__ == "__main__":
     print("CSV files saved.")
     wandb.log({"status": "CSV files saved"})
 
-    # Load the covariate names from the CSV file
-    covariate_names = pd.read_csv(args.covariates, header=None).iloc[:, 0].tolist()
-
     # Get the model and parameter grid based on user input
     model, param_grid = get_model_and_params(args.model)
 
