@@ -21,7 +21,7 @@ import time
 
 # Function to define the model and parameter grid based on user input
 def get_model_and_params(model_type):
-    if model_type == 'logistic_regression':
+    if model_type in ['logistic_regression', 'logistic_regression_no_fs']:
         model = LogisticRegression()
         param_grid = {
             'classifier__C': [0.1, 1, 10],
@@ -34,18 +34,18 @@ def get_model_and_params(model_type):
             'classifier__max_depth': [None, 10, 20],
             'classifier__class_weight': ['balanced']
         }
-    elif model_type == 'xgboost':
-        model = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+    elif model_type in ['xgboost', 'xgboost_no_fs']:
+        model = XGBClassifier(use_label_encoder=False, eval_metric='logloss', n_jobs=None)
         param_grid = {
             'classifier__n_estimators': [100, 200],
             'classifier__learning_rate': [0.01, 0.1, 0.2],
-            'classifier__scale_pos_weight': [1, 10, 25]
+            'classifier__scale_pos_weight': [1, 10, 100, 1000]
         }
-    elif model_type == 'svm':
+    elif model_type in ['svm', 'svm_no_fs']:
         model = SVC(probability=True)
         param_grid = {
             'classifier__C': [0.1, 1, 10],
-            'classifier__kernel': ['linear', 'rbf'],
+            'classifier__kernel': ['linear', 'rbf', 'poly'],
             'classifier__class_weight': ['balanced']
         }
     elif model_type == 'l1_logistic_regression':
@@ -60,7 +60,7 @@ def get_model_and_params(model_type):
     return model, param_grid
 
 # Generalized function to create and train the model pipeline with class weights
-def train_model(model, param_grid, model_name, folder_path):
+def train_model(X_train, y_train, model, param_grid, model_name, folder_path, feature_selection='False'):
     start_time = time.time()
     
     # Define the preprocessing for numeric features (imputation + scaling)
@@ -83,15 +83,15 @@ def train_model(model, param_grid, model_name, folder_path):
             ('cat', categorical_transformer, categorical_features)
         ])
 
- # Define the feature selection step if not L1 logistic regression
-    if model_name not in ['l1_logistic_regression', 'random_forest_no_fs']:
+    # Define the feature selection step if not 'no_fs' or 'l1_logistic_regression'
+    if feature_selection == 'True' and 'l1_logistic_regression' not in model_name:
         feature_selection = SelectPercentile(score_func=f_classif, percentile=1)
         pipeline_steps = [
             ('preprocessor', preprocessor),
             ('feature_selection', feature_selection),
             ('classifier', model)
         ]
-    else:
+    elif feature_selection == 'False' or 'l1_logistic_regression' in model_name:
         print(f"Skipping feature selection for {model_name}.")
         wandb.log({"status": f"Skipping feature selection for {model_name}"})
         pipeline_steps = [
@@ -107,7 +107,13 @@ def train_model(model, param_grid, model_name, folder_path):
 
     # Perform 5-fold cross-validation with parallelization and verbose output
     grid_search_start_time = time.time()
-    grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring='roc_auc', n_jobs=-1, verbose=10)
+
+    if 'xgboost' in model_name:
+        n_threads = 1 # XGBoost does not support n_jobs parameter in conjunction with sklearn's GridSearchCV
+    else:
+        n_threads = -1
+
+    grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring='roc_auc', n_jobs=n_threads, verbose=10)
     grid_search.fit(X_train, y_train)
     grid_search_end_time = time.time()
 
@@ -201,45 +207,46 @@ def plot_metrics(model, X, y, dataset_name, model_name, folder_path):
         plt.close()
         wandb.log({f"{dataset_name}_confusion_matrix_{threshold}": wandb.Image(cm_path)})
 
-# Function to plot retained features
-def plot_retained_features(model, X, feature_names, model_name, folder_path):
-    # Get the feature selection step from the pipeline
-    feature_selection = model.named_steps['feature_selection']
-    mask = feature_selection.get_support()  # Get the boolean mask of selected features
+# # Function to plot retained features - Deprecated as functionality transferred to 2_Polyproteomic_FeatureImportance_Evaluator.py
+# def plot_retained_features(model, X, feature_names, model_name, folder_path):
+#     # Get the feature selection step from the pipeline
+#     feature_selection = model.named_steps['feature_selection']
+#     mask = feature_selection.get_support()  # Get the boolean mask of selected features
     
-    # Debugging: Print shapes of feature_names and mask
-    print(f"Shape of feature_names: {feature_names.shape}")
-    print(f"Shape of mask: {mask.shape}")
+#     # Debugging: Print shapes of feature_names and mask
+#     print(f"Shape of feature_names: {feature_names.shape}")
+#     print(f"Shape of mask: {mask.shape}")
 
-    # Ensure the mask length matches the number of features
-    if len(mask) != len(feature_names):
-        raise ValueError("The length of the feature selection mask does not match the number of features.")
+#     # Ensure the mask length matches the number of features
+#     if len(mask) != len(feature_names):
+#         raise ValueError("The length of the feature selection mask does not match the number of features.")
 
-    selected_features = feature_names[mask]
-    all_scores = feature_selection.scores_
+#     selected_features = feature_names[mask]
+#     all_scores = feature_selection.scores_
 
-    # Sort the retained features by descending order of score magnitude
-    sorted_indices_retained = np.argsort(all_scores[mask])[::-1]
-    sorted_selected_features = selected_features[sorted_indices_retained]
-    sorted_selected_scores = all_scores[mask][sorted_indices_retained]
+#     # Sort the retained features by descending order of score magnitude
+#     sorted_indices_retained = np.argsort(all_scores[mask])[::-1]
+#     sorted_selected_features = selected_features[sorted_indices_retained]
+#     sorted_selected_scores = all_scores[mask][sorted_indices_retained]
 
-    # Plot the retained features
-    plt.figure(figsize=(10, 6))
-    sns.barplot(x=sorted_selected_features, y=sorted_selected_scores)
-    plt.xticks(rotation=90)
-    plt.title('Retained Features after Model-Based Feature Selection')
-    plt.xlabel('Features')
-    plt.ylabel('ANOVA F-ratio')
-    retained_features_path = os.path.join(folder_path, f'{model_name}_retained_features.png')
-    plt.savefig(retained_features_path)
-    plt.close()
-    wandb.log({f"{model_name}_retained_features": wandb.Image(retained_features_path)})
+#     # Plot the retained features
+#     plt.figure(figsize=(10, 6))
+#     sns.barplot(x=sorted_selected_features, y=sorted_selected_scores)
+#     plt.xticks(rotation=90)
+#     plt.title('Retained Features after Model-Based Feature Selection')
+#     plt.xlabel('Features')
+#     plt.ylabel('ANOVA F-ratio')
+#     retained_features_path = os.path.join(folder_path, f'{model_name}_retained_features.png')
+#     plt.savefig(retained_features_path)
+#     plt.close()
+#     wandb.log({f"{model_name}_retained_features": wandb.Image(retained_features_path)})
 
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Train a model for case-control classification.')
     parser.add_argument('--model', type=str, required=True, help="Model type: 'logistic_regression', 'random_forest', 'xgboost', 'svm'")
     parser.add_argument('--output_folder', type=str, required=True, help="Folder path to save the plots and model")
+    parser.add_argument('--feature_selection', type=str, required=True, help="Define whether or not feature selection is applied prior to training")
     args = parser.parse_args()
 
     # Create the output folder if it does not exist
@@ -309,6 +316,9 @@ if __name__ == "__main__":
     print("CSV files saved.")
     wandb.log({"status": "CSV files saved"})
 
+    # Load the covariate names from the CSV file
+    covariate_names = pd.read_csv(args.covariates, header=None).iloc[:, 0].tolist()
+
     # Get the model and parameter grid based on user input
     model, param_grid = get_model_and_params(args.model)
 
@@ -316,17 +326,17 @@ if __name__ == "__main__":
     wandb.config.update(param_grid)
 
     # Train the model
-    trained_model = train_model(model, param_grid, args.model, args.output_folder)
+    trained_model = train_model(X_train, y_train, model, param_grid, args.model, args.output_folder, args.feature_selection)
 
     # Plot metrics for the training set
     plot_metrics(trained_model, X_train, y_train, "Training", args.model, args.output_folder)
 
-    # Get feature names after preprocessing
-    preprocessor = trained_model.named_steps['preprocessor']
-    feature_names = np.concatenate([
-        preprocessor.transformers_[0][1].named_steps['scaler'].get_feature_names_out(X_train.select_dtypes(include=['int64', 'float64']).columns),
-        preprocessor.transformers_[1][1].named_steps['onehot'].get_feature_names_out(X_train.select_dtypes(include=['object']).columns)
-    ])
+    # # Get feature names after preprocessing
+    # preprocessor = trained_model.named_steps['preprocessor']
+    # feature_names = np.concatenate([
+    #     preprocessor.transformers_[0][1].named_steps['scaler'].get_feature_names_out(X_train.select_dtypes(include=['int64', 'float64']).columns),
+    #     preprocessor.transformers_[1][1].named_steps['onehot'].get_feature_names_out(X_train.select_dtypes(include=['object']).columns)
+    # ])
 
     # Plot retained features for the final model on the training set
-    plot_retained_features(trained_model, X_train, feature_names, args.model, args.output_folder)
+    # plot_retained_features(trained_model, X_train, feature_names, args.model, args.output_folder)
