@@ -13,16 +13,16 @@ conda activate python3.11_ml
 export OMP_NUM_THREADS=8
 
 # echo 'Training model for logistic regression'
-# python 1_Polyproteomic_CaseControl_Train.py --model logistic_regression --output_folder ../OUTPUT/UKB/ML/1_LR --feature_selection False
+# python 1_Polyproteomic_CaseControl_Train.py --model logistic_regression --plot_output_folder ../OUTPUT/UKB/ML/1_LR --feature_selection False --model_output_folder ../OUTPUT/UKB/ML/models/
 
 # echo  'Training model for l1_logistic_regression'
-# python 1_Polyproteomic_CaseControl_Train.py --model l1_logistic_regression --output_folder ../OUTPUT/UKB/ML/2_L1_LR --feature_selection False
+# python 1_Polyproteomic_CaseControl_Train.py --model l1_logistic_regression --plot_output_folder ../OUTPUT/UKB/ML/2_L1_LR --feature_selection False --model_output_folder ../OUTPUT/UKB/ML/models/
 
 # echo 'Training model for random forest'
-# python 1_Polyproteomic_CaseControl_Train.py --model random_forest --output_folder ../OUTPUT/UKB/ML/3_RF --feature_selection False
+# python 1_Polyproteomic_CaseControl_Train.py --model random_forest --plot_output_folder ../OUTPUT/UKB/ML/3_RF --feature_selection False --model_output_folder ../OUTPUT/UKB/ML/models/
 
 # echo 'Training model for xgboost'
-# python 1_Polyproteomic_CaseControl_Train.py --model xgboost --output_folder ../OUTPUT/UKB/ML/4_XGB --feature_selection False
+# python 1_Polyproteomic_CaseControl_Train.py --model xgboost --plot_output_folder ../OUTPUT/UKB/ML/4_XGB --feature_selection False --model_output_folder ../OUTPUT/UKB/ML/models/
 
 echo 'Training model for svm'
-python 1_Polyproteomic_CaseControl_Train.py --model svm --output_folder ../OUTPUT/UKB/ML/5_SVM --feature_selection False
+python 1_Polyproteomic_CaseControl_Train.py --model svm --plot_output_folder ../OUTPUT/UKB/ML/5_SVM --feature_selection False --model_output_folder ../OUTPUT/UKB/ML/models/
