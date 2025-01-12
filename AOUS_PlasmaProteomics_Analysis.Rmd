@@ -416,6 +416,7 @@ bucket_rds_importer <- function(basepath, filename){
 }
 
 bucket_basepath <- 'gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/'
+
 demo_cov <- bucket_rds_importer(bucket_basepath,'all_demo_bmi_dbp_deprivation.rds')
 cardio_biomarkers_cleaned_sdfiltered <- bucket_rds_importer(bucket_basepath,'all_pp_sdfiltered.rds')
 diagnoses_cleaned <- bucket_rds_importer(bucket_basepath,'all_hcm_hf_t2d_diag.rds')
@@ -714,6 +715,10 @@ cdr_importer <- function(export_path){
 }
   
 genetic_ancest <- cdr_importer('gs://fc-aou-datasets-controlled/v7/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv')
+
+european_only_IDs <- genetic_ancest %>%
+  filter(ancestry_pred == 'eur') %>%
+  select(research_id)
 
 #Parse the PC scores for each individual into pc1:pc5 columns
 genetic_ancest <- genetic_ancest %>%
@@ -1314,6 +1319,28 @@ system('gsutil -m cp -r ~/DATA/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a90
 system('gsutil -m cp -r ~/OUTPUT/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/')
 
 ```
+# EUR-Only HCM
+
+This filters for only European ancestry HCM individuals as per predicted genetic ancestry from All of Us.
+
+```{r}
+#Reimport in the hcm_regenie_pheno and hcm_regenie_covar files
+system('gsutil cp gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/hcm_regenie_pheno.tsv ./')
+system('gsutil cp gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/hcm_regenie_cov.tsv ./')
+
+regenie_hcm <- read_tsv('hcm_regenie_pheno.tsv')
+regenie_cov2 <- read_tsv('hcm_regenie_cov.tsv')
+
+#Filter for only European ancestry 
+eur_regenie_hcm <- regenie_hcm %>% filter(IID %in% european_only_IDs$research_id)
+eur_regenie_cov2 <- regenie_cov2 %>% filter(IID %in% european_only_IDs$research_id)
+write_tsv(eur_regenie_hcm, 'DATA/hcm_regenie_pheno_euronly.tsv')
+write_tsv(eur_regenie_cov2, 'DATA/hcm_regenie_cov_euronly.tsv')
+
+#Reupload
+system('gsutil cp DATA/hcm_regenie_pheno_euronly.tsv gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/')
+system('gsutil cp DATA/hcm_regenie_cov_euronly.tsv gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/')
+```
 
 # EDA of HCM Cases vs. Controls
 
@@ -1322,46 +1349,59 @@ This performs some EDA of the age and sex distributions of the cases & controls 
 ```{r}
 library(MatchIt)
 
-#Import from bucket
-regenie_hcm <- bucket_rds_importer(bucket_basepath, 'hcm_regenie_pheno.tsv')
-regenie_cov2 <- bucket_rds_importer(bucket_basepath, 'hcm_regenie_cov.tsv')
-
-hcm_cases <- filter(regenie_hcm, hcm==T) %>% select(IID)
-age_sex_hcm_cases_controls <- regenie_cov2 %>%
-  filter(if_all(everything(), ~!is.na(.))) %>%  #Filter only for those with non-NA in covariates
-  select(IID, sex, age) %>%
-  mutate(hcm = ifelse(IID %in% hcm_cases$IID, 1,0)) %>%
-  filter(!is.na(age) & !is.na(sex))%>%
+age_sex_dist_eda <- function(bucket_basepath, pheno_filename, cov_filename, output_suffix, output_folder = './'){
+  
+  #Import from bucket
+  regenie_hcm <- bucket_rds_importer(bucket_basepath, pheno_filename)
+  regenie_cov2 <- bucket_rds_importer(bucket_basepath, cov_filename)
+  
+  hcm_cases <- filter(regenie_hcm, hcm==T) %>% select(IID)
+  
+  age_sex_hcm_cases_controls <- regenie_cov2 %>%
+    filter(if_all(everything(), ~!is.na(.))) %>%  #Filter only for those with non-NA in covariates
+    select(IID, sex, age) %>%
+    mutate(hcm = ifelse(IID %in% hcm_cases$IID, 1,0)) %>%
+    filter(!is.na(age) & !is.na(sex))%>%
     mutate(hcm=factor(hcm, levels=c(0,1), labels=c('Control','Case')))
+  
+  print(str_c('Number of HCM cases in dataset = ', sum(age_sex_hcm_cases_controls$hcm == 'Case')))
+  
+  #Evaluate initial imbalance
+  init <- matchit(hcm ~ age + sex, data = age_sex_hcm_cases_controls,
+                   method = NULL, distance = "glm")
+  
+  summary(init)
+  
+  plot(init, type = "density", interactive = FALSE,
+       which.xs = ~age +sex)
+  
+  #Plot initial imbalance plots
+  age_dist <- ggplot(age_sex_hcm_cases_controls)+
+    geom_density(aes(x=age, fill=hcm),alpha=0.5)
+  print(age_dist)
+  ggsave(str_c(output_folder, 'nomatch_agedist', output_suffix, '.png'),age_dist,dpi=600)
+  
+  sex_dist_tb<- age_sex_hcm_cases_controls%>%
+      group_by(sex, hcm) %>%
+      summarise(count = n()) %>%
+      group_by(hcm) %>%
+      mutate(proportion = count / sum(count))
+  
+  #Plot sex distributions in ggplot2
+  sex_dist <- ggplot(sex_dist_tb , aes(x = hcm, y = proportion, fill = sex)) +
+    geom_bar(stat = "identity", position = "fill") 
+  print(sex_dist)
+  ggsave(str_c(output_folder, 'nomatch_sexdist',output_suffix,'.png'),sex_dist,dpi=600)
+  
+  system('gsutil cp nomatch_* gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
+  
+  return(age_sex_hcm_cases_controls)
+  
+}
 
-#Evaluate initial imbalance
-init <- matchit(hcm ~ age + sex, data = age_sex_hcm_cases_controls,
-                 method = NULL, distance = "glm")
+age_sex_hcm_cases_controls <- age_sex_dist_eda(bucket_basepath,'hcm_regenie_pheno.tsv', 'hcm_regenie_cov.tsv', '')
+age_sex_hcm_cases_controls_euronly <- age_sex_dist_eda(bucket_basepath,'hcm_regenie_pheno_euronly.tsv', 'hcm_regenie_cov_euronly.tsv', '_euronly', './euronly/')
 
-summary(init)
-
-plot(init, type = "density", interactive = FALSE,
-     which.xs = ~age +sex)
-
-#Plot initial imbalance plots
-age_dist <- ggplot(age_sex_hcm_cases_controls)+
-  geom_density(aes(x=age, fill=hcm),alpha=0.5)
-print(age_dist)
-ggsave('nomatch_agedist.png',age_dist,dpi=600)
-
-sex_dist_tb<- age_sex_hcm_cases_controls%>%
-    group_by(sex, hcm) %>%
-    summarise(count = n()) %>%
-    group_by(hcm) %>%
-    mutate(proportion = count / sum(count))
-
-#Plot sex distributions in ggplot2
-sex_dist <- ggplot(sex_dist_tb , aes(x = hcm, y = proportion, fill = sex)) +
-  geom_bar(stat = "identity", position = "fill") 
-print(sex_dist)
-ggsave('nomatch_sexdist.png',sex_dist,dpi=600)
-
-system('gsutil cp nomatch_* gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
 ```
 This shows that the initial imbalance is age-skewed with greater average age for cases cf. controls and slightly different sex distribution as well.
 
@@ -1409,26 +1449,37 @@ age_sex_matcher <- function(input_tb, case_control_ratio = 40, plot_output_path=
 }
 
 matched_list <- map(c(40,100,200,250), ~age_sex_matcher(age_sex_hcm_cases_controls, case_control_ratio=.))
-```
-
-Now extracting the matched controls to the cases for a ratio of 200 (because it performs well)
-
-```{r}
-matched_cases_controls <- match.data(matched_list[[2]])
-
-matched_regenie_pheno <- regenie_hcm %>%
-  filter(IID %in% matched_cases_controls$IID)
-
-matched_regenie_cov <- regenie_cov2 %>%
-  filter(IID %in% matched_cases_controls$IID)
-
-write_tsv(matched_regenie_pheno, 'hcm_regenie_pheno_agesexmatched100.tsv')
-write_tsv(matched_regenie_cov, 'hcm_regenie_cov_agesexmatched100.tsv')
-
-system('gsutil cp hcm_regenie_pheno_agesexmatched100.tsv hcm_regenie_cov_agesexmatched100.tsv -t gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/' )
+matched_list_euronly <- map(c(40,100,200,250), ~age_sex_matcher(age_sex_hcm_cases_controls_euronly, case_control_ratio=., plot_output_path = './euronly/'))
 
 system('gsutil -m cp age_sex_matched_glm_* gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
+system('gsutil -m cp -r ./euronly/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
+```
 
+Now extracting the matched controls to the cases for a ratio of 100 (because it performs well)
 
+```{r}
+
+age_sexmatched_filewriter <- function(index_choice, input_list, regenie_pheno, regenie_covar, output_suffix){
+  
+  matched_cases_controls <- match.data(input_list[[index_choice]])
+
+  matched_regenie_pheno <- regenie_pheno %>%
+    filter(IID %in% matched_cases_controls$IID)
+  
+  matched_regenie_cov <- regenie_covar %>%
+    filter(IID %in% matched_cases_controls$IID)
+  
+  output_phenoname <- str_c('hcm_regenie_pheno_agesexmatched',output_suffix)
+  output_covname <- str_c('hcm_regenie_cov_agesexmatched',output_suffix)
+  
+  write_tsv(matched_regenie_pheno, output_phenoname)
+  write_tsv(matched_regenie_cov, output_covname)
+  
+  system(str_c('gsutil cp', output_phenoname, output_covname, 'gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/', sep =' '))
+
+}
+
+age_sexmatched_filewriter (2, matched_list,regenie_hcm, regenie_cov2,'100.tsv')
+age_sexmatched_filewriter (2, matched_list_euronly, eur_regenie_hcm, eur_regenie_cov2,'100_euronly.tsv')
 ```
 
