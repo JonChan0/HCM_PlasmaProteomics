@@ -8,7 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from sklearn.svm import SVC
 from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.model_selection import GridSearchCV, train_test_split, StratifiedKFold
 import joblib
 import argparse
 import matplotlib.pyplot as plt
@@ -16,7 +16,7 @@ import seaborn as sns
 from sklearn.metrics import accuracy_score, roc_curve, auc, precision_recall_curve, confusion_matrix, f1_score
 import os
 import wandb
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline, FeatureUnion
 import time
 
 # Function to define the model and parameter grid based on user input
@@ -28,28 +28,28 @@ def get_model_and_params(model_type):
             'classifier__class_weight': ['balanced']
         }
     elif model_type in ['random_forest', 'random_forest_no_fs']:
-        model = RandomForestClassifier()
+        model = RandomForestClassifier(random_state=42)
         param_grid = {
             'classifier__n_estimators': [100, 200],
             'classifier__max_depth': [None, 10, 20],
             'classifier__class_weight': ['balanced']
         }
     elif model_type in ['xgboost', 'xgboost_no_fs']:
-        model = XGBClassifier(use_label_encoder=False, eval_metric='logloss', n_jobs=None)
+        model = XGBClassifier(use_label_encoder=False, eval_metric='logloss', n_jobs=None, random_state=42)
         param_grid = {
             'classifier__n_estimators': [100, 200],
             'classifier__learning_rate': [0.01, 0.1, 0.2],
             'classifier__scale_pos_weight': [1, 10, 100, 1000]
         }
     elif model_type in ['svm', 'svm_no_fs']:
-        model = SVC(probability=True)
+        model = SVC(probability=True,random_state=42)
         param_grid = {
             'classifier__C': [0.1, 1, 10],
             'classifier__kernel': ['linear', 'rbf', 'poly'],
             'classifier__class_weight': ['balanced']
         }
     elif model_type == 'l1_logistic_regression':
-        model = LogisticRegression(penalty='l1', solver='liblinear')
+        model = LogisticRegression(penalty='l1', solver='liblinear',random_state=42)
         param_grid = {
             'classifier__C': [0.1, 1, 10],
             'classifier__class_weight': ['balanced']
@@ -60,50 +60,80 @@ def get_model_and_params(model_type):
     return model, param_grid
 
 # Generalized function to create and train the model pipeline with class weights
-def train_model(X_train, y_train, model, param_grid, model_name, model_output_folder, feature_selection='False'):
+def train_model(X_train, y_train, model, param_grid, model_name, model_output_folder, feature_selection='False', features_to_bypass_fs=[], features_to_select_fs=[]):
     start_time = time.time()
+    # Determine indices for quantitative (numeric) features only
+    quantitative_feature_indices = [
+        X_train.columns.get_loc(col) for col in X_train.select_dtypes(include=['int64', 'float64']).columns
+    ]
+
+    # Determine indices for categorical features only
+    categorical_feature_indices = [
+        X_train.columns.get_loc(col) for col in X_train.select_dtypes(include=['object']).columns
+    ]
+
+    # Use only the quantitative feature indices for the features to select and bypass
+    features_to_select_indices = [
+        idx for idx in quantitative_feature_indices if X_train.columns[idx] in features_to_select_fs
+    ]
+
+    features_to_bypass_indices = [
+        idx for idx in quantitative_feature_indices if X_train.columns[idx] in features_to_bypass_fs
+    ]
+
+      # Check if model type is random forest or xgboost
+    if model_name in ['random_forest', 'xgboost'] and feature_selection == 'True':
+        bypass_pipeline = Pipeline(steps=[('pass','passthrough')])  # No scaling
+        selection_pipeline = Pipeline(steps=[
+            ('feature_selection', SelectPercentile(score_func=f_classif, percentile=1))  # Feature selection only
+        ])
+    elif model_name in ['random_forest', 'xgboost'] and feature_selection == 'False':
+        bypass_pipeline = Pipeline(steps=[('pass','passthrough')]) #No scaling
+        selection_pipeline = Pipeline(steps=[('pass','passthrough')]) #No feature selection
     
-    # Define the preprocessing for numeric features (imputation + scaling)
-    numeric_features = X_train.select_dtypes(include=['int64', 'float64']).columns
-    numeric_transformer = Pipeline(steps=[
-        ('imputer', KNNImputer(n_neighbors=5)),
-        ('scaler', StandardScaler())
-    ])
-
-    # Define the preprocessing for categorical features (one-hot encoding)
-    categorical_features = X_train.select_dtypes(include=['object']).columns
-    categorical_transformer = Pipeline(steps=[
-        ('onehot', OneHotEncoder(handle_unknown='ignore'))
-    ])
-
-    # Combine preprocessing steps
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', numeric_transformer, numeric_features),
-            ('cat', categorical_transformer, categorical_features)
+    else: #For other model types beyond tree-based
+        # Preprocessing for bypassed quantitative features (scaling)
+        bypass_pipeline = Pipeline(steps=[
+            ('scaler', StandardScaler())  # Scaling
         ])
 
-    # Define the feature selection step if not 'no_fs' or 'l1_logistic_regression'
-    if feature_selection == 'True' and 'l1_logistic_regression' not in model_name:
-        feature_selection = SelectPercentile(score_func=f_classif, percentile=1)
-        pipeline_steps = [
-            ('preprocessor', preprocessor),
-            ('feature_selection', feature_selection),
-            ('classifier', model)
+        if feature_selection == 'False' or model_name == 'l1_logistic_regression':
+            # Preprocessing and feature selection for selected quantitative features
+            selection_pipeline = Pipeline(steps=[
+                ('scaler', StandardScaler())  # Scaling
+            ])
+        else:
+              # Preprocessing and feature selection for selected quantitative features
+            selection_pipeline = Pipeline(steps=[
+                ('scaler', StandardScaler()),  # Scaling
+                ('feature_selection', SelectPercentile(score_func=f_classif, percentile=1))  # Feature selection
+            ])
+
+    # Apply KNNImputer to all quantitative features and OneHotEncoder to all categorical features
+    preprocessor_before_split = ColumnTransformer(
+        transformers=[
+            ('imputer', KNNImputer(n_neighbors=5), quantitative_feature_indices),
+            ('encoder', OneHotEncoder(handle_unknown='ignore'), categorical_feature_indices)
         ]
-    elif feature_selection == 'False' or 'l1_logistic_regression' in model_name:
-        print(f"Skipping feature selection for {model_name}.")
-        wandb.log({"status": f"Skipping feature selection for {model_name}"})
-        pipeline_steps = [
-            ('preprocessor', preprocessor),
-            ('classifier', model)
-        ]
+    )
+    #Combine the pipelines for bypass and for select features
+    quantitative_pipeline = ColumnTransformer(
+        transformers=[
+            ('bypass', bypass_pipeline, features_to_bypass_indices),
+            ('select', selection_pipeline, features_to_select_indices)
+        ],
+    remainder='passthrough'
+    )
+
+    # Define the final pipeline with KNNImputer applied before splitting
+    pipeline = Pipeline(steps=[
+        ('imputer_preprocessor', preprocessor_before_split),  # Impute all quantitative features and scale categorical features
+        ('feature_preprocessor', quantitative_pipeline),  # Process bypass and selected features + pass through categorical features
+        ('classifier', model)  # Replace `model` with your classifier
+    ])
 
     print("Starting model training...")
     wandb.log({"status": "Starting model training"})
-
-  # Define the model pipeline
-    pipeline = Pipeline(steps=pipeline_steps)
 
     # Perform 5-fold cross-validation with parallelization and verbose output
     grid_search_start_time = time.time()
@@ -113,7 +143,7 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     else:
         n_threads = -1
 
-    grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring='roc_auc', n_jobs=n_threads, verbose=10)
+    grid_search = GridSearchCV(pipeline, param_grid, cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42), scoring='roc_auc', n_jobs=n_threads, verbose=10)
     grid_search.fit(X_train, y_train)
     grid_search_end_time = time.time()
 
@@ -207,40 +237,6 @@ def plot_metrics(model, X, y, dataset_name, model_name, plot_output_folder):
         plt.close()
         wandb.log({f"{dataset_name}_confusion_matrix_{threshold}": wandb.Image(cm_path)})
 
-# # Function to plot retained features - Deprecated as functionality transferred to 2_Polyproteomic_FeatureImportance_Evaluator.py
-# def plot_retained_features(model, X, feature_names, model_name, folder_path):
-#     # Get the feature selection step from the pipeline
-#     feature_selection = model.named_steps['feature_selection']
-#     mask = feature_selection.get_support()  # Get the boolean mask of selected features
-    
-#     # Debugging: Print shapes of feature_names and mask
-#     print(f"Shape of feature_names: {feature_names.shape}")
-#     print(f"Shape of mask: {mask.shape}")
-
-#     # Ensure the mask length matches the number of features
-#     if len(mask) != len(feature_names):
-#         raise ValueError("The length of the feature selection mask does not match the number of features.")
-
-#     selected_features = feature_names[mask]
-#     all_scores = feature_selection.scores_
-
-#     # Sort the retained features by descending order of score magnitude
-#     sorted_indices_retained = np.argsort(all_scores[mask])[::-1]
-#     sorted_selected_features = selected_features[sorted_indices_retained]
-#     sorted_selected_scores = all_scores[mask][sorted_indices_retained]
-
-#     # Plot the retained features
-#     plt.figure(figsize=(10, 6))
-#     sns.barplot(x=sorted_selected_features, y=sorted_selected_scores)
-#     plt.xticks(rotation=90)
-#     plt.title('Retained Features after Model-Based Feature Selection')
-#     plt.xlabel('Features')
-#     plt.ylabel('ANOVA F-ratio')
-#     retained_features_path = os.path.join(folder_path, f'{model_name}_retained_features.png')
-#     plt.savefig(retained_features_path)
-#     plt.close()
-#     wandb.log({f"{model_name}_retained_features": wandb.Image(retained_features_path)})
-
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Train a model for case-control classification.')
@@ -248,6 +244,8 @@ if __name__ == "__main__":
     parser.add_argument('--plot_output_folder', type=str, required=True, help="Folder path to save the plots and model")
     parser.add_argument('--model_output_folder', type=str, required=True, help="Folder path to save the model")
     parser.add_argument('--feature_selection', type=str, required=True, help="Define whether or not feature selection is applied prior to training")
+    parser.add_argument('--features_to_bypass_fs', type=str, default='', help="CSV file of features to bypass feature selection")
+    parser.add_argument('--features_to_select_fs', type=str, default='', help="CSV file of features to select for feature selection")
     args = parser.parse_args()
 
     # Create the output folder if it does not exist
@@ -257,10 +255,12 @@ if __name__ == "__main__":
     # Initialize wandb with a project name based on the model type
     wandb.init(project=f"polyproteomic_casecontrol_{args.model}")
 
-# Log configuration parameters
+    # Log configuration parameters
     wandb.config.update({
         "model_type": args.model,
-        "plot_output_folder": args.plot_output_folder
+        "plot_output_folder": args.plot_output_folder,
+        "model_output_folder": args.model_output_folder,
+        "feature_selection": args.feature_selection
     })
 
     print("Importing data...")
@@ -274,12 +274,12 @@ if __name__ == "__main__":
     print(exclusion_list.shape)
     print(pp_i0_covariates.shape)
 
-    #Print the number of HCM cases and controls in pp_i0_covariates
-    print(pp_i0_covariates['hcm'].value_counts())
-
     #Filter the pp and the covariate dataframes for individuals not in exclusion list
     pp_i0_covariates = pp_i0_covariates[~pp_i0_covariates['eid'].isin(exclusion_list['eid'])]
     print(pp_i0_covariates.shape) #49,586 individuals
+
+    #Print the number of HCM cases and controls in pp_i0_covariates after exclusion
+    print(pp_i0_covariates['hcm'].value_counts())
 
     #Extract out the X and y variables from the pp_i0_covariates dataframe where the y variable is labelled 'hcm' column and the x variable is all other columns
     X = pp_i0_covariates.drop(columns=['eid', 'hcm', 'instance'])
@@ -309,13 +309,28 @@ if __name__ == "__main__":
     wandb.log({"status": "Saving training and test sets to CSV files"})
 
     #Write out the training and test sets to csv files
-    X_train.to_csv(os.path.join(args.output_folder,'X_train.csv'), index=False)
-    X_test.to_csv(os.path.join(args.output_folder,'X_test.csv'), index=False)
-    y_train.to_csv(os.path.join(args.output_folder,'y_train.csv'), index=False)
-    y_test.to_csv(os.path.join(args.output_folder,'y_test.csv'), index=False)
+    X_train.to_csv(os.path.join(args.plot_output_folder,'X_train.csv'), index=False)
+    X_test.to_csv(os.path.join(args.plot_output_folder,'X_test.csv'), index=False)
+    y_train.to_csv(os.path.join(args.plot_output_folder,'y_train.csv'), index=False)
+    y_test.to_csv(os.path.join(args.plot_output_folder,'y_test.csv'), index=False)
 
     print("CSV files saved.")
     wandb.log({"status": "CSV files saved"})
+
+    #Load the features to bypass and the features to select
+    if args.features_to_bypass_fs:
+        features_to_bypass_fs = pd.read_csv(args.features_to_bypass_fs, header=None).iloc[:, 0].tolist()
+        print(features_to_bypass_fs)
+        wandb.config.update({"features_to_bypass_fs": features_to_bypass_fs})
+    else:
+        features_to_bypass_fs = []
+
+    if args.features_to_select_fs:
+        features_to_select_fs = pd.read_csv(args.features_to_select_fs).loc[:, 'name'].tolist()
+        print(features_to_select_fs)
+        wandb.config.update({"features_to_select_fs": features_to_select_fs})
+    else:
+        features_to_select_fs = []
 
     # Get the model and parameter grid based on user input
     model, param_grid = get_model_and_params(args.model)
@@ -324,17 +339,7 @@ if __name__ == "__main__":
     wandb.config.update(param_grid)
 
     # Train the model
-    trained_model = train_model(X_train, y_train, model, param_grid, args.model, args.model_output_folder, args.feature_selection)
+    trained_model = train_model(X_train, y_train, model, param_grid, args.model, args.model_output_folder, args.feature_selection, features_to_bypass_fs, features_to_select_fs)
 
     # Plot metrics for the training set
     plot_metrics(trained_model, X_train, y_train, "Training", args.model, args.plot_output_folder)
-
-    # # Get feature names after preprocessing
-    # preprocessor = trained_model.named_steps['preprocessor']
-    # feature_names = np.concatenate([
-    #     preprocessor.transformers_[0][1].named_steps['scaler'].get_feature_names_out(X_train.select_dtypes(include=['int64', 'float64']).columns),
-    #     preprocessor.transformers_[1][1].named_steps['onehot'].get_feature_names_out(X_train.select_dtypes(include=['object']).columns)
-    # ])
-
-    # Plot retained features for the final model on the training set
-    # plot_retained_features(trained_model, X_train, feature_names, args.model, args.output_folder)
