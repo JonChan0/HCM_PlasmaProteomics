@@ -18,11 +18,13 @@ import os
 import wandb
 from sklearn.pipeline import Pipeline, FeatureUnion
 import time
+import sklearn
+sklearn.set_config(transform_output="pandas")
 
 # Function to define the model and parameter grid based on user input
 def get_model_and_params(model_type):
     if model_type in ['logistic_regression', 'logistic_regression_no_fs']:
-        model = LogisticRegression()
+        model = LogisticRegression(solver = 'liblinear')
         param_grid = {
             'classifier__C': [0.1, 1, 10],
             'classifier__class_weight': ['balanced']
@@ -62,24 +64,22 @@ def get_model_and_params(model_type):
 # Generalized function to create and train the model pipeline with class weights
 def train_model(X_train, y_train, model, param_grid, model_name, model_output_folder, feature_selection='False', features_to_bypass_fs=[], features_to_select_fs=[]):
     start_time = time.time()
-    # Determine indices for quantitative (numeric) features only
-    quantitative_feature_indices = [
-        X_train.columns.get_loc(col) for col in X_train.select_dtypes(include=['int64', 'float64']).columns
-    ]
 
-    # Determine indices for categorical features only
-    categorical_feature_indices = [
-        X_train.columns.get_loc(col) for col in X_train.select_dtypes(include=['object']).columns
-    ]
+    # Determine feature names for quantitative (numeric) features only
+    quantitative_feature_names = X_train.select_dtypes(include=['int64', 'float64']).columns.tolist()
 
-    # Use only the quantitative feature indices for the features to select and bypass
-    features_to_select_indices = [
-        idx for idx in quantitative_feature_indices if X_train.columns[idx] in features_to_select_fs
-    ]
+    # Determine feature names for categorical features only
+    categorical_feature_names = X_train.select_dtypes(include=['object']).columns.tolist()
 
-    features_to_bypass_indices = [
-        idx for idx in quantitative_feature_indices if X_train.columns[idx] in features_to_bypass_fs
-    ]
+    # Determine feature names for boolean features
+    boolean_feature_names = X_train.select_dtypes(include=['bool']).columns.tolist()
+
+    print(quantitative_feature_names)
+    print(categorical_feature_names)
+    print(boolean_feature_names)
+
+    features_to_select_names = [col for col in quantitative_feature_names if col in features_to_select_fs]
+    features_to_bypass_names = [col for col in quantitative_feature_names if col in features_to_bypass_fs]
 
       # Check if model type is random forest or xgboost
     if model_name in ['random_forest', 'xgboost'] and feature_selection == 'True':
@@ -109,20 +109,22 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
                 ('feature_selection', SelectPercentile(score_func=f_classif, percentile=1))  # Feature selection
             ])
 
-    # Apply KNNImputer to all quantitative features and OneHotEncoder to all categorical features
+    # Apply KNNImputer to all quantitative features and OneHotEncoder to all categorical and boolean features
     preprocessor_before_split = ColumnTransformer(
         transformers=[
-            ('imputer', KNNImputer(n_neighbors=5), quantitative_feature_indices),
-            ('encoder', OneHotEncoder(handle_unknown='ignore'), categorical_feature_indices)
-        ]
+            ('imputer', KNNImputer(n_neighbors=5), quantitative_feature_names),
+            ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_feature_names),
+            ('boolean_pass', Pipeline(steps=[('pass','passthrough')]),boolean_feature_names)
+        ],verbose_feature_names_out=False
     )
-    #Combine the pipelines for bypass and for select features
+
+    # Combine the pipelines for bypass and for select features
     quantitative_pipeline = ColumnTransformer(
         transformers=[
-            ('bypass', bypass_pipeline, features_to_bypass_indices),
-            ('select', selection_pipeline, features_to_select_indices)
-        ],
-    remainder='passthrough'
+            ('bypass', bypass_pipeline, features_to_bypass_names),
+            ('select', selection_pipeline, features_to_select_names),
+            ('boolean_pass', Pipeline(steps=[('pass','passthrough')]),boolean_feature_names)
+        ],verbose_feature_names_out=False, remainder='passthrough' #This remainder = one-hot encoded categorical variables
     )
 
     # Define the final pipeline with KNNImputer applied before splitting
