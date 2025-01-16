@@ -1276,7 +1276,7 @@ regenie_cov2 <- select(genetic_ancest, person_id=research_id,pc1:pc10) %>%
   left_join(select(demo_cov, person_id, sex=sex_at_birth, date_of_birth), by='person_id') %>%
   left_join(htwt_measurements, by='person_id')
 
-#For their age, I take their age at the cutoff of the most recent CDR i.e V7 = 07/01/22 
+#For their age, I take their age at the cutoff of the most recent CDR i.e V7 = 07/01/22 July 1 2022
 #This would be the last date that individuals could be diagnosed with HCM and still be considered a case in the AoUS dataset.
 
 regenie_cov2 <- regenie_cov2 %>%
