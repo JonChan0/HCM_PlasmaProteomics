@@ -19,6 +19,9 @@ import wandb
 from sklearn.pipeline import Pipeline, FeatureUnion
 import time
 import sklearn
+from sklearn.cross_decomposition import PLSRegression
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+
 sklearn.set_config(transform_output="pandas")
 
 # Function to define the model and parameter grid based on user input
@@ -56,8 +59,24 @@ def get_model_and_params(model_type):
             'classifier__C': [0.1, 1, 10],
             'classifier__class_weight': ['balanced']
         }
+    elif model_type == 'spls_lda':
+        model = Pipeline([
+            ('pls', PLSRegression()),
+            ('classifier', LinearDiscriminantAnalysis())
+        ])
+        param_grid = {
+            'classifier__pls__n_components': [2, 5, 10, 30, 50, 100, 200]
+        }
+    elif model_type == 'spls_qda':
+        model = Pipeline([
+            ('pls', PLSRegression()),
+            ('classifier', QuadraticDiscriminantAnalysis())
+        ])
+        param_grid = {
+            'classifier__pls__n_components': [2, 5, 10, 30, 50, 100, 200]
+        }
     else:
-        raise ValueError("Unsupported model type. Choose from 'logistic_regression', 'random_forest', 'xgboost', 'svm', 'l1_logistic_regression'.")
+        raise ValueError("Unsupported model type. Choose from 'logistic_regression', 'random_forest', 'xgboost', 'svm', 'l1_logistic_regression', 'spls_lda', 'spls_qda'.")
     
     return model, param_grid
 
