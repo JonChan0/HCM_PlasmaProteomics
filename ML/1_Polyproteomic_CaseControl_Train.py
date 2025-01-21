@@ -16,7 +16,7 @@ import seaborn as sns
 from sklearn.metrics import accuracy_score, roc_curve, auc, precision_recall_curve, confusion_matrix, f1_score
 import os
 import wandb
-from sklearn.pipeline import Pipeline, FeatureUnion
+from sklearn.pipeline import Pipeline
 import time
 import sklearn
 from sklearn.cross_decomposition import PLSRegression
@@ -267,14 +267,17 @@ if __name__ == "__main__":
     parser.add_argument('--feature_selection', type=str, required=True, help="Define whether or not feature selection is applied prior to training")
     parser.add_argument('--features_to_bypass_fs', type=str, default='', help="CSV file of features to bypass feature selection")
     parser.add_argument('--features_to_select_fs', type=str, default='', help="CSV file of features to select for feature selection")
+    parser.add_argument('--target_variable', type=str, default='', help="The target variable is either prevalent (i.e HCM case/control status) or incident (i.e incident HCM diagnosis)")
+    parser.add_argument('--X_train_data', type=str, default='', help="The model data containing training data for X")
+    parser.add_argument('--y_train_data', type=str, default='', help="The model data containing training data for y")
     args = parser.parse_args()
 
-    # Create the output folder if it does not exist
-    if not os.path.exists(args.plot_output_folder):
-        os.makedirs(args.plot_output_folder)
+    
 
-    # Initialize wandb with a project name based on the model type
-    wandb.init(project=f"polyproteomic_casecontrol_{args.model}")
+    if args.target_variable == 'prevalent': # Initialize wandb with a project name based on the model type
+        wandb.init(project=f"polyproteomic_casecontrol_{args.model}")
+    elif args.target_variable == 'incident':
+        wandb.init(project=f"polyproteomic_incident_{args.model}")
 
     # Log configuration parameters
     wandb.config.update({
@@ -287,56 +290,16 @@ if __name__ == "__main__":
     print("Importing data...")
     wandb.log({"status": "Importing data"})
 
-    # Import data
-    exclusion_list = pd.read_csv('../DATA/UKB/w11223_20241217.csv', header=None)
-    exclusion_list.columns=['eid'] #Rename the column to 'eid'
-    pp_i0_covariates = pd.read_csv('../DATA/UKB/PROCESSED/2_5Y/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv', sep='\t') #Already filtered for individuals which are at least non-NA in one Olink pp and non-NA values in covariates.
-
-    print(exclusion_list.shape)
-    print(pp_i0_covariates.shape)
-
-    #Filter the pp and the covariate dataframes for individuals not in exclusion list
-    pp_i0_covariates = pp_i0_covariates[~pp_i0_covariates['eid'].isin(exclusion_list['eid'])]
-    print(pp_i0_covariates.shape) #49,586 individuals
-
-    #Print the number of HCM cases and controls in pp_i0_covariates after exclusion
-    print(pp_i0_covariates['hcm'].value_counts())
-
-    #Extract out the X and y variables from the pp_i0_covariates dataframe where the y variable is labelled 'hcm' column and the x variable is all other columns
-    X = pp_i0_covariates.drop(columns=['eid', 'hcm', 'instance'])
-    y = pp_i0_covariates['hcm']
-
-    print("Data import completed.")
-    wandb.log({"status": "Data import completed"})
-
-    print("Splitting data into training and test sets...")
-    wandb.log({"status": "Splitting data into training and test sets"})
-
-    #Split off the X and y dataframes into a 80% training and 20% test set
-    from sklearn.model_selection import train_test_split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+    X_train = pd.read_csv(args.X_train_data)
+    y_train = pd.read_csv(args.y_train_data)
 
     print(X_train.shape)
-    print(X_test.shape)
 
     #Print the number of HCM=true and HCM=false in the training and test set
     print(y_train.value_counts())
-    print(y_test.value_counts())
 
-    print("Data splitting completed.")
-    wandb.log({"status": "Data splitting completed"})
-
-    print("Saving training and test sets to CSV files...")
-    wandb.log({"status": "Saving training and test sets to CSV files"})
-
-    #Write out the training and test sets to csv files
-    X_train.to_csv(os.path.join(args.plot_output_folder,'X_train.csv'), index=False)
-    X_test.to_csv(os.path.join(args.plot_output_folder,'X_test.csv'), index=False)
-    y_train.to_csv(os.path.join(args.plot_output_folder,'y_train.csv'), index=False)
-    y_test.to_csv(os.path.join(args.plot_output_folder,'y_test.csv'), index=False)
-
-    print("CSV files saved.")
-    wandb.log({"status": "CSV files saved"})
+    print("Data import completed.")
+    wandb.log({"status": "Data import completed"})
 
     #Load the features to bypass and the features to select
     if args.features_to_bypass_fs:
