@@ -21,6 +21,7 @@ import time
 import sklearn
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+from sklearn.base import BaseEstimator, TransformerMixin
 
 sklearn.set_config(transform_output="pandas")
 
@@ -40,7 +41,7 @@ def get_model_and_params(model_type):
             'classifier__class_weight': ['balanced']
         }
     elif model_type in ['xgboost', 'xgboost_no_fs']:
-        model = XGBClassifier(use_label_encoder=False, eval_metric='logloss', n_jobs=None, random_state=42)
+        model = XGBClassifier(use_label_encoder=False, eval_metric='logloss', n_jobs=1, random_state=42)
         param_grid = {
             'classifier__n_estimators': [100, 200],
             'classifier__learning_rate': [0.01, 0.1, 0.2],
@@ -60,17 +61,21 @@ def get_model_and_params(model_type):
             'classifier__class_weight': ['balanced']
         }
     elif model_type == 'spls_lda':
+        class PLSComponentTransformer(BaseEstimator, TransformerMixin):
+            def __init__(self, n_components=2):
+                self.n_components = n_components
+                self.pls = PLSRegression(n_components=self.n_components)
+            
+            def fit(self, X, y=None):
+                self.pls.fit(X, y)
+                return self
+            
+            def transform(self, X):
+                return self.pls.transform(X)
+
         model = Pipeline([
-            ('pls', PLSRegression()),
-            ('classifier', LinearDiscriminantAnalysis())
-        ])
-        param_grid = {
-            'classifier__pls__n_components': [2, 5, 10, 30, 50, 100, 200]
-        }
-    elif model_type == 'spls_qda':
-        model = Pipeline([
-            ('pls', PLSRegression()),
-            ('classifier', QuadraticDiscriminantAnalysis())
+            ('pls', PLSComponentTransformer()),  # Use the custom transformer
+            ('lda', LinearDiscriminantAnalysis())
         ])
         param_grid = {
             'classifier__pls__n_components': [2, 5, 10, 30, 50, 100, 200]
@@ -159,12 +164,7 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     # Perform 5-fold cross-validation with parallelization and verbose output
     grid_search_start_time = time.time()
 
-    if 'xgboost' in model_name:
-        n_threads = 1 # XGBoost does not support n_jobs parameter in conjunction with sklearn's GridSearchCV
-    else:
-        n_threads = -1
-
-    grid_search = GridSearchCV(pipeline, param_grid, cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42), scoring='roc_auc', n_jobs=n_threads, verbose=10)
+    grid_search = GridSearchCV(pipeline, param_grid, cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42), scoring='roc_auc', n_jobs=-1, verbose=10)
     grid_search.fit(X_train, y_train)
     grid_search_end_time = time.time()
 
