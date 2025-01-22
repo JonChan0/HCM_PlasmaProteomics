@@ -11,8 +11,8 @@ parser.add_argument('--target_variable', type=str, default='', help="The target 
 args = parser.parse_args()
 
 # Create the output folder if it does not exist
-if not os.path.exists(args.plot_output_folder):
-    os.makedirs(args.plot_output_folder)
+if not os.path.exists(args.data_output_folder):
+    os.makedirs(args.data_output_folder)
 
 print("Importing data...")
 
@@ -28,14 +28,17 @@ print(pp_i0_covariates.shape)
 pp_i0_covariates = pp_i0_covariates[~pp_i0_covariates['eid'].isin(exclusion_list['eid'])]
 print(pp_i0_covariates.shape) 
 
-#Print the number of HCM cases and controls in pp_i0_covariates after exclusion
-print(pp_i0_covariates['hcm'].value_counts())
-
 #Extract out the X and y variables from the pp_i0_covariates dataframe where the y variable is labelled 'hcm' column and the x variable is all other columns
 if args.target_variable == 'prevalent':
+    #Print the number of HCM cases and controls in pp_i0_covariates after exclusion
+    print(pp_i0_covariates['hcm'].value_counts())
+
     X = pp_i0_covariates.drop(columns=['eid', 'hcm', 'instance'])
     y = pp_i0_covariates['hcm']
+
 elif args.target_variable == 'incident':
+    #Print the number of HCM cases and controls in pp_i0_covariates after exclusion
+    print(pp_i0_covariates['incidenthcm_status'].value_counts())
     X = pp_i0_covariates.drop(columns=['eid', 'incidenthcm_status', 'instance'])
     y = pp_i0_covariates['incidenthcm_status']
 
@@ -61,6 +64,6 @@ print("Saving training and test sets to CSV files...")
 X_train.to_csv(os.path.join(args.data_output_folder,'X_train.csv'), index=False)
 X_test.to_csv(os.path.join(args.data_output_folder,'X_test.csv'), index=False)
 y_train.to_csv(os.path.join(args.data_output_folder,'y_train.csv'), index=False)
-y_test.to_csv(os.path.join(args.data__output_folder,'y_test.csv'), index=False)
+y_test.to_csv(os.path.join(args.data_output_folder,'y_test.csv'), index=False)
 
 print("CSV files saved.")

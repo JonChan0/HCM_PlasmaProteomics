@@ -19,8 +19,8 @@ export OMP_NUM_THREADS=2
 
 # Scenario 2: Incident HCM prediction from the 5Y controls
 python 0_Polyproteomic_Data_Splitter.py \
-    --data_path '../DATA/UKB/PROCESSED/2_5Y/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_CoxHCMDiag.tsv' \
-    --data_output_folder '../OUTPUT/UKB/ML/1_data/3_hcm_incident_no_prs/' \
+    --data_path '../DATA/UKB/PROCESSED/2_5Y/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_HCMdiagCox.tsv' \
+    --data_output_folder '../OUTPUT/UKB/ML/1_data/3_hcm_incident_noprs/' \
     --target_variable 'incident' 
 
-#N.B You have to append the cv_prs column manually to the X_train, X_test, y_train, y_test columns
+#N.B You have to append the cv_prs column manually to the X_train, X_test, y_train, y_test columns afterwards
