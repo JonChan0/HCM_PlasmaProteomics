@@ -293,9 +293,8 @@ if __name__ == "__main__":
     X_train = pd.read_csv(args.X_train_data)
     y_train = pd.read_csv(args.y_train_data)
 
-    #Remove the eid columns from both X_train and y_train
+    #Remove the eid columns from X_train
     X_train = X_train.drop(columns='eid')
-    y_train = y_train.drop(columns='eid')
 
     print(X_train.shape)
 
