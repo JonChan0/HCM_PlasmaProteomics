@@ -33,14 +33,14 @@ if args.target_variable == 'prevalent':
     #Print the number of HCM cases and controls in pp_i0_covariates after exclusion
     print(pp_i0_covariates['hcm'].value_counts())
 
-    X = pp_i0_covariates.drop(columns=['eid', 'hcm', 'instance'])
-    y = pp_i0_covariates['hcm']
+    X = pp_i0_covariates.drop(columns=['hcm', 'instance'])
+    y = pp_i0_covariates.loc[:,['eid','hcm']]
 
 elif args.target_variable == 'incident':
     #Print the number of HCM cases and controls in pp_i0_covariates after exclusion
     print(pp_i0_covariates['incidenthcm_status'].value_counts())
-    X = pp_i0_covariates.drop(columns=['eid', 'incidenthcm_status', 'instance'])
-    y = pp_i0_covariates['incidenthcm_status']
+    X = pp_i0_covariates.drop(columns=['incidenthcm_status', 'instance'])
+    y = pp_i0_covariates.loc[:,['eid','incidenthcm_status']]
 
 print("Data import completed.")
 
