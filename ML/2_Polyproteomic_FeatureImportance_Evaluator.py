@@ -7,6 +7,10 @@ import seaborn as sns
 import shap
 import argparse
 from sklearn.impute import KNNImputer
+import sklearn
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+sklearn.set_config(transform_output="pandas")
 
 def load_model(model_path):
     """Load the saved model from a .pkl file."""
@@ -72,16 +76,20 @@ def plot_feature_importance(model, X, feature_names, model_name, output_folder, 
         # Select only numerical columns
         numerical_columns = X.select_dtypes(include=['number']).columns
         
-        # Initialize the KNNImputer
+        # Initialize the KNNImputer and OneHotEncoder
         imputer = KNNImputer(n_neighbors=5)
+        encoder = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+        scaler= StandardScaler()
         
-        # Apply KNNImputer to numerical columns
+        # Apply KNNImputer to numerical columns and OneHotEncoder to categorical_columns
         X[numerical_columns] = imputer.fit_transform(X[numerical_columns])
+        X[numerical_columns] = scaler.fit_transform(X[numerical_columns])
+        X = encoder.fit_transform(X)
 
-        #Perform one-hot encoding on X to ensure all numerics
-        X = pd.get_dummies(X)
+        #Select for only features present in model
+        X = X[feature_names]
 
-        background = shap.sample(X, 100)  # Use a sample of the data as the background
+        background = shap.sample(X, 100, random_state=42)  # Use a sample of the data as the background
         explainer = shap.KernelExplainer(classifier.predict, background)
         shap_values = explainer.shap_values(X)
         # explainer = shap.Explainer(classifier.predict, X)
