@@ -86,7 +86,7 @@ def get_model_and_params(model_type):
     return model, param_grid
 
 # Generalized function to create and train the model pipeline with class weights
-def train_model(X_train, y_train, model, param_grid, model_name, model_output_folder, feature_selection='False', features_to_bypass_fs=[], features_to_select_fs=[]):
+def train_model(X_train, y_train, model, param_grid, model_name, model_output_folder, X_train_data_path, feature_selection='False', features_to_bypass_fs=[], features_to_select_fs=[]):
     start_time = time.time()
 
     # Determine feature names for quantitative (numeric) features only
@@ -157,6 +157,14 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
         ('feature_preprocessor', quantitative_pipeline),  # Process bypass and selected features + pass through categorical features
         ('classifier', model)  # Replace `model` with your classifier
     ])
+
+    X_train_preprocessed = pipeline.named_steps['imputer_preprocessor'].transform(X_train)
+    X_train_preprocessed = pipeline.named_steps['feature_preprocessor'].transform(X_train_preprocessed)
+    base_folder = os.path.dirname(X_train_data_path)
+    preprocessed_data_path = os.path.join(base_folder, f'X_train_preprocessed_{model_name}.csv')
+    pd.DataFrame(X_train_preprocessed, columns=pipeline.named_steps['feature_preprocessor'].get_feature_names_out()).to_csv(preprocessed_data_path, index=False)
+    print(f"Preprocessed X_train data saved to {preprocessed_data_path}")
+    wandb.log({"status": "Saved preprocessed training data"})
 
     print("Starting model training...")
     wandb.log({"status": "Starting model training"})
@@ -272,8 +280,6 @@ if __name__ == "__main__":
     parser.add_argument('--y_train_data', type=str, default='', help="The model data containing training data for y")
     args = parser.parse_args()
 
-    
-
     if args.target_variable == 'prevalent': # Initialize wandb with a project name based on the model type
         wandb.init(project=f"polyproteomic_casecontrol_{args.model}")
     elif args.target_variable == 'incident':
@@ -294,7 +300,8 @@ if __name__ == "__main__":
     y_train = pd.read_csv(args.y_train_data)
 
     #Remove the eid columns from X_train
-    X_train = X_train.drop(columns='eid')
+    if 'eid' in X_train.columns:
+        X_train = X_train.drop(columns='eid')
 
     print(X_train.shape)
 
@@ -326,7 +333,7 @@ if __name__ == "__main__":
     wandb.config.update(param_grid)
 
     # Train the model
-    trained_model = train_model(X_train, y_train, model, param_grid, args.model, args.model_output_folder, args.feature_selection, features_to_bypass_fs, features_to_select_fs)
+    trained_model = train_model(X_train, y_train, model, param_grid, args.model, args.model_output_folder, args.X_train_data, args.feature_selection, features_to_bypass_fs, features_to_select_fs)
 
     # Plot metrics for the training set
     plot_metrics(trained_model, X_train, y_train, "Training", args.model, args.plot_output_folder)
