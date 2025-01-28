@@ -21,42 +21,49 @@ X_train_data_path='../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train.csv'
 y_train_data_path='../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/y_train.csv'
 
 # echo 'Training model for logistic regression'
-# python 1_Polyproteomic_CaseControl_Train.py --model logistic_regression --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/1_LR \
+# python 1_Polyproteomic_ML_Train.py --model logistic_regression --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/1_LR \
 #     --feature_selection True \
 #     --model_output_folder $model_output_folder \
 #     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
 #     --target_variable $target_variable --X_train_data $X_train_data_path  --y_train_data $y_train_data_path
 
 # echo  'Training model for l1_logistic_regression'
-# python 1_Polyproteomic_CaseControl_Train.py --model l1_logistic_regression --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/2_L1_LR \
+# python 1_Polyproteomic_ML_Train.py --model l1_logistic_regression --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/2_L1_LR \
 #     --feature_selection False \
 #     --model_output_folder $model_output_folder\
 #     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
 #     --target_variable $target_variable --X_train_data $X_train_data_path --y_train_data $y_train_data_path
 
 # echo 'Training model for random forest'
-# python 1_Polyproteomic_CaseControl_Train.py --model random_forest --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/3_RF \
+# python 1_Polyproteomic_ML_Train.py --model random_forest --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/3_RF \
 #     --feature_selection True \
 #     --model_output_folder $model_output_folder\
 #     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
 #     --target_variable $target_variable --X_train_data $X_train_data_path --y_train_data $y_train_data_path
 
 # echo 'Training model for xgboost'
-# python 1_Polyproteomic_CaseControl_Train.py --model xgboost --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/4_XGB \
+# python 1_Polyproteomic_ML_Train.py --model xgboost --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/4_XGB \
 #     --feature_selection True \
 #     --model_output_folder $model_output_folder\
 #     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
 #     --target_variable $target_variable --X_train_data $X_train_data_path --y_train_data $y_train_data_path
 
 # echo 'Training model for svm'
-# python 1_Polyproteomic_CaseControl_Train.py --model svm --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/5_SVM \
+# python 1_Polyproteomic_ML_Train.py --model svm --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/5_SVM \
 #     --feature_selection True \
 #     --model_output_folder $model_output_folder\
 #     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
 #     --target_variable $target_variable --X_train_data $X_train_data_path --y_train_data $y_train_data_path
 
-echo 'Training model for PLS as feature selection step + LDA for binary classification = PLS-LDA'
-python 1_Polyproteomic_CaseControl_Train.py --model spls_lda --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/6_PLS_LDA \
+# echo 'Training model for PLS as feature selection step + LDA for binary classification = PLS-LDA'
+# python 1_Polyproteomic_ML_Train.py --model spls_lda --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/6_PLS_LDA \
+#     --feature_selection False \
+#     --model_output_folder $model_output_folder\
+#     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
+#     --target_variable $target_variable --X_train_data $X_train_data_path --y_train_data $y_train_data_path
+
+echo 'Training model for elastic_net logistic regression'
+python 1_Polyproteomic_ML_Train.py --model elastic_net_logistic_regression --plot_output_folder ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/7_EL_LR \
     --feature_selection False \
     --model_output_folder $model_output_folder\
     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \

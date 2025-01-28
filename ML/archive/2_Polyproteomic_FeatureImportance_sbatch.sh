@@ -14,5 +14,8 @@ conda activate python3.11_ml
 export OMP_NUM_THREADS=4
 
 echo 'Evaluating feature importance'
-python 2_Polyproteomic_FeatureImportance_Evaluator.py --model_folder ../OUTPUT/UKB/ML/2_models/ \
-    --output_folder ../OUTPUT/UKB/ML/3_summary_plots/feature_importance/ --data_file ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train.csv
+python 2_Polyproteomic_FeatureImportance_Evaluator.py \
+    --model_name svm \
+    --model_pkl_file ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/svm_best_model.pkl \
+    --output_folder ../OUTPUT/UKB/ML/3_summary_plots/feature_importance/ \
+    --X_data_file ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train_preprocessed_svm.csv
