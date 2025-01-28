@@ -20,10 +20,22 @@ from sklearn.pipeline import Pipeline
 import time
 import sklearn
 from sklearn.cross_decomposition import PLSRegression
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.base import BaseEstimator, TransformerMixin
 
 sklearn.set_config(transform_output="pandas")
+
+class PLSComponentTransformer(BaseEstimator, TransformerMixin):
+        def __init__(self, n_components=2):
+            self.n_components = n_components
+            self.pls = PLSRegression(n_components=self.n_components)
+        
+        def fit(self, X, y=None):
+            self.pls.fit(X, y)
+            return self
+        
+        def transform(self, X):
+            return self.pls.transform(X)
 
 # Function to define the model and parameter grid based on user input
 def get_model_and_params(model_type):
@@ -60,19 +72,14 @@ def get_model_and_params(model_type):
             'classifier__C': [0.1, 1, 10],
             'classifier__class_weight': ['balanced']
         }
+    elif model_type == 'elastic_net_logistic_regression':
+        model = LogisticRegression(penalty='elasticnet', solver='saga', l1_ratio=0.5, random_state=42)
+        param_grid = {
+            'classifier__C': [0.1, 1, 10],
+            'classifier__class_weight': ['balanced'],
+            'classifier__l1_ratio': [0.1, 0.5, 0.9]
+        }
     elif model_type == 'spls_lda':
-        class PLSComponentTransformer(BaseEstimator, TransformerMixin):
-            def __init__(self, n_components=2):
-                self.n_components = n_components
-                self.pls = PLSRegression(n_components=self.n_components)
-            
-            def fit(self, X, y=None):
-                self.pls.fit(X, y)
-                return self
-            
-            def transform(self, X):
-                return self.pls.transform(X)
-
         model = Pipeline([
             ('pls', PLSComponentTransformer()),  # Use the custom transformer
             ('lda', LinearDiscriminantAnalysis())
@@ -81,7 +88,7 @@ def get_model_and_params(model_type):
             'classifier__pls__n_components': [2, 5, 10, 30, 50, 100, 200]
         }
     else:
-        raise ValueError("Unsupported model type. Choose from 'logistic_regression', 'random_forest', 'xgboost', 'svm', 'l1_logistic_regression', 'spls_lda', 'spls_qda'.")
+        raise ValueError("Unsupported model type. Choose from 'logistic_regression', 'random_forest', 'xgboost', 'svm', 'l1_logistic_regression', 'spls_lda', 'elastic_net_logistic_regression'.")
     
     return model, param_grid
 
@@ -121,7 +128,7 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
             ('scaler', StandardScaler())  # Scaling
         ])
 
-        if feature_selection == 'False' or model_name == 'l1_logistic_regression':
+        if feature_selection == 'False' or model_name in ['l1_logistic_regression', 'elastic_net_logistic_regression']:
             # Preprocessing and feature selection for selected quantitative features
             selection_pipeline = Pipeline(steps=[
                 ('scaler', StandardScaler())  # Scaling
@@ -158,8 +165,8 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
         ('classifier', model)  # Replace `model` with your classifier
     ])
 
-    X_train_preprocessed = pipeline.named_steps['imputer_preprocessor'].transform(X_train)
-    X_train_preprocessed = pipeline.named_steps['feature_preprocessor'].transform(X_train_preprocessed)
+    X_train_preprocessed = pipeline.named_steps['imputer_preprocessor'].fit_transform(X_train)
+    X_train_preprocessed = pipeline.named_steps['feature_preprocessor'].fit_transform(X_train_preprocessed)
     base_folder = os.path.dirname(X_train_data_path)
     preprocessed_data_path = os.path.join(base_folder, f'X_train_preprocessed_{model_name}.csv')
     pd.DataFrame(X_train_preprocessed, columns=pipeline.named_steps['feature_preprocessor'].get_feature_names_out()).to_csv(preprocessed_data_path, index=False)
@@ -191,7 +198,7 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     joblib.dump(grid_search.best_estimator_, model_path)
 
     # Log the model to wandb
-    wandb.save(f'{model_name}_best_model.pkl')
+    # wandb.save(f'{model_name}_best_model.pkl')
 
     # Log timing information
     total_time = time.time() - start_time

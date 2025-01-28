@@ -1,6 +1,7 @@
-model_names: ['logistic_regression', 'l1_logistic_regression','random_forest', 'xgboost', 'svm', 'spls_lda']
-model_output_names: ['1_LR','2_L1_LR','3_RF','4_XGB','5_SVM','6_PLS_LDA']
-feature_selection: [True, False, True, True, True, False]
+model_names: ['elastic_net_logistic_regression','random_forest', 'xgboost', 'svm', 'spls_lda']
+model_output_names: ['7_EL_LR','3_RF','4_XGB','5_SVM','6_PLS_LDA']
+feature_selection: [False, True, True, True, False]
+
 base_data_folder: '../OUTPUT/UKB/ML/1_data/'
 base_model_folder: '../OUTPUT/UKB/ML/2_models/'
 base_plot_folder: '../OUTPUT/UKB/ML/3_summary_plots/'
@@ -14,6 +15,8 @@ features_to_select: '../DATA/UKB/ML/ML_pp_names.csv' #This refers to the quantit
 
 # FOR MODEL TRAINING
 # target_variable: 'prevalent'
+
+
 
 ## For target variable = HCM incidence
 # FOR DATA SPLITTING
