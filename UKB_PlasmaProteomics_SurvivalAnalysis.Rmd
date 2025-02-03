@@ -34,6 +34,9 @@ instance <- '3_TOTAL'
 # instance <- '2_5Y'
 # instance <- '4_NEGTOTAL' #Those who are never HCM or HF patients
 
+# pp_scaling <- 'scale' #This flag is used if you want to flag the scales via scale()
+pp_scaling <- 'ranknorm'
+
 #This is derived from `UKB_Plasma_Proteomics_Analysis.Rmd` and contains the HCM cases corresponding to the particular instance (I0; 5Y or Total)
 if(isTRUE(rcmm_cov)){
   ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv',collapse=''))
@@ -41,7 +44,31 @@ if(isTRUE(rcmm_cov)){
   ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking.tsv',collapse=''))
 }
 
- ukb_pp_hcm_cov2 <- ukb_pp_hcm_cov2 %>%
+if (pp_scaling == 'scale'){
+  pp <- ukb_pp_hcm_cov2 %>% select('nppb':'npc2') %>%
+    scale()
+  
+  ukb_pp_hcm_cov2 <- ukb_pp_hcm_cov2 %>%
+    select(-('nppb':'npc2')) %>%
+    bind_cols(pp)
+  rm(pp)
+  
+}else if (pp_scaling == 'ranknorm'){
+  ukb_pp_hcm_cov2 <- ukb_pp_hcm_cov2 %>%
+    mutate(across(nppb:npc2, ~ replace(., !is.na(.), RNOmni::RankNorm(.[!is.na(.)]))))
+}
+
+#Check the distribution of NTproBNP and HRC 
+print(hist(ukb_pp_hcm_cov2$ntprobnp))
+print(hist(ukb_pp_hcm_cov2$hrc))
+
+print(mean(ukb_pp_hcm_cov2$ntprobnp, na.rm=T))
+print(mean(ukb_pp_hcm_cov2$hrc, na.rm=T))
+
+print(sd(ukb_pp_hcm_cov2$ntprobnp, na.rm=T))
+print(sd(ukb_pp_hcm_cov2$hrc, na.rm=T))
+
+ukb_pp_hcm_cov2 <- ukb_pp_hcm_cov2 %>%
   mutate(smoking=factor(smoking, levels=c('Never','Previous','Current')))
 
 if (instance %in% c('1_I0','2_5Y','3_TOTAL')) {
@@ -185,6 +212,10 @@ km_survival_curv_plotter <- function(input_tb, categorical_var, status, outcome_
     plot <- eval.parent(plot)
   
     print(plot)
+    
+    if (isFALSE(dir.exists(plot_output_folder))){
+      dir.create(plot_output_folder, recursive=T)
+    }
     
     pdf(str_c(plot_output_folder,deparse(substitute(categorical_var)),'_kaplan_',type,'.pdf'), width=12, height=9)
     print(plot, newpage=F)
@@ -472,7 +503,7 @@ Now plot a summary plot of the results for each predictor.
 
 ```{r multivariate_cox_plotter, fig.width=9, fig.height=6, message=F,warning=F}
 
-multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, selected_vars = c('ntprobnp','hrc'),FDR=5, xlim=c(0,20), ylim=c(0,7)){
+multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, selected_vars = c('ntprobnp','hrc'),FDR=5, xlim=c(0,8), ylim=c(0,7), pp_scaling =F){
   
   if (!is.numeric(FDR)){ #Apply Bonferroni
     pval_threshold = 0.05/nrow(multivariate_results)
@@ -494,7 +525,7 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
     # geom_text_repel(aes(label=HR))+
     scale_colour_brewer(name='Predictor',palette='Dark2')+
     scale_shape_discrete(name='Outcome')+
-    xlab('Hazard Ratio')+
+    xlab(ifelse(pp_scaling == F, 'Hazard Ratio', 'Hazard Ratio per SD'))+
     ylab(ifelse(mtc=='Bonferroni','-log10 (Wald-test p value)', '-log10 (Adjusted Wald-test p value)'))+
     scale_x_continuous(n.breaks=10, limits=xlim, expand = expansion(0,0))+
     scale_y_continuous(limits=ylim, expand = expansion(0,0))+
@@ -503,6 +534,11 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
   # +   guides(col=guide_legend(nrow=1, byrow=TRUE)) 
   
   print(multivariate_plot)
+  
+    if (isFALSE(dir.exists(plot_output_path))){
+      dir.create(plot_output_folder, recursive=T)
+    }
+  
   ggsave(str_c(plot_output_path, 'cox_multivariate_', output_name,'.png'), dpi=600, width=9, height=6)
   
   return(multivariate_results)
@@ -517,10 +553,10 @@ if(isTRUE(rcmm_cov)){
 multivariate_cox_results <- multivariate_cox_results %>%
   mutate(predictor = factor(predictor, levels=c('NTPROBNP','HRC')))
 
-multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_alloutcomes_fdr5', selected_vars=c('ntprobnp'))
-multivariate_coxph_plotter(multivariate_cox_results,path, 'hrc_alloutcomes_fdr5', selected_vars=c('hrc'))
-multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_hrc_alloutcomes_fdr5')
-multivariate_coxph_plotter(multivariate_cox_results, path, 'ntprobnp_hrc_alloutcomes_bonferroni', FDR=F, ylim=c(0,8))
+multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_alloutcomes_fdr5', selected_vars=c('ntprobnp'), pp_scaling = pp_scaling)
+multivariate_coxph_plotter(multivariate_cox_results,path, 'hrc_alloutcomes_fdr5', selected_vars=c('hrc'), pp_scaling = pp_scaling)
+multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_hrc_alloutcomes_fdr5', pp_scaling = pp_scaling)
+multivariate_coxph_plotter(multivariate_cox_results, path, 'ntprobnp_hrc_alloutcomes_bonferroni', FDR=F, ylim=c(0,8), pp_scaling = pp_scaling)
 
 ```
 ### Cox Assumptions
@@ -562,6 +598,7 @@ ph_assumption_paths <- (expand_grid(surv_ages, pp) %>% mutate(path = str_c('OUTP
 multivariate_cox_ph <- map2(multivariate_cox_models, ph_assumption_paths, ~ph_assumption_tester(.x, .y))
 ```
 Sex appears to violate the PH assumption for HRC/NTproBNP x Overall Composite so I attempt to correct this here.
+N.B After RNOmni::RankNorm of the PP values, this is no longer the case.
 
 The two main ways to correct for violation of this proportional hazards assumption is
 
@@ -673,6 +710,10 @@ The first plots show the estimated changes in the regression coefficients by del
 Ideally, you want the largest y-values in these plots to be << actual coefficients for the predictor. A large value would indicate that deleting that observation shifts the coefficient substantially (relative to the actual coefficient).
 
 ```{r dfbeta, fig.width=15, fig.height=15, message=F, warning=F}
+#If not correcting as above block
+td_covar_ntprobnp_overallcomp_model <- multivariate_cox_models[[5]]
+td_covar_hrc_overallcomp_model <- multivariate_cox_models[[6]]
+
 
 print(summary(td_covar_ntprobnp_overallcomp_model)) #These are the actual coefficients
 
@@ -720,7 +761,7 @@ martingale_plotter <- function(input_tb, var, y_formula="Surv(overallcomp_age, o
   ggcoxfunctional(formula,data=filter(input_tb, !is.na(var)))
 }
 
-martingale_plotter(ukb_tb, 'bmi')
+# martingale_plotter(ukb_tb, 'bmi')
 
 #Because the pp values are inverse-rank normalised, there are negative values so only check squared and normal
 
@@ -730,6 +771,9 @@ ggcoxfunctional(as.formula('Surv(overallcomp_age, overallcomp_status)~hrc + I(hr
 ggcoxfunctional(as.formula('Surv(overallcomp_age, overallcomp_status)~bmi + I(bmi^2) + log(bmi) + I(sqrt(bmi))'), data=filter(ukb_tb,!is.na(bmi), bmi!=0))
 ```
 
+```{r}
+sessionInfo()
+```
 
 
 # Archived
