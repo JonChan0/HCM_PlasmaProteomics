@@ -103,9 +103,9 @@ This R Markdown describes the analysis of the UK Biobank plasma proteomics data 
 ## 5Y = Only considering i0 cases OR cases diagnosed within 5 years of attendance OR died within 5 years of attendance and had death cause record mentioning disease
 ## Total = Considering ALL cases recorded in the UKB regardless of date of diagnosis
 
-# instance <- '3_TOTAL'
+instance <- '3_TOTAL'
 # instance <- '1_I0'
-instance <- '2_5Y'
+# instance <- '2_5Y'
 
 # instance <- '4_NEGTOTAL' #Those who are never HCM or HF patients
 
@@ -338,6 +338,106 @@ if (isTRUE(rcmm_cov)){
 sum(ukb_pp_hcm_cov2$hcm)
 sum(ukb_pp_hcm_cov2$t2d)
 ```
+
+
+# QC of Time-Instancing
+
+This compares the two subgroups of HCM patients that are divided by the time-instancing approach - specifically this approach splits the total HCM cases in UKB into
+
+1. Those diagnosed by time of blood sample collection or <5 years after = 42 cases
+2. Those diagnosed >5 years of blood sample collection = 58 cases
+
+I don't filter out the HF cases btw.
+
+```{r}
+#HCM Cases - Total
+total_ukb_hcm <- read_csv('DATA/UKB/RAP/Cases/ukb_rap_HCM_20240209.csv') %>%
+  dplyr::rename(ID=1)
+
+#HCM Cases - UKB 5Y
+fiveyear_ukb_hcm <- read_tsv('DATA/UKB/PROCESSED/2_5Y/ukb_rap_HCM_20240209_5Ycases.tsv')
+
+#Non-5Y cases i.e 'incident'
+fiveyear_incident_ukb_hcm <- total_ukb_hcm %>%
+  filter(!ID %in% fiveyear_ukb_hcm$ID)
+
+#This is the formatted tibble with all covariates
+og_tb <- read_tsv(str_c('DATA/UKB/PROCESSED/3_TOTAL/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv')) %>%  #
+  select(-hcm)
+
+#Filter
+og_tb <- og_tb %>%
+  mutate(hcm_instance = case_when(
+    eid %in% fiveyear_ukb_hcm$ID ~ '<5Y Case',
+    eid %in% fiveyear_incident_ukb_hcm$ID ~ '>5Y Case',
+    T ~ 'Control'
+  ))
+
+print(table(og_tb$hcm_instance))
+```
+
+Compare across
+
+1) Age
+2) NTproBNP and HRC (raw)
+3) PC1 and PC2 scores (PCA computed over cases + controls and over all 2.9k plasma proteins)
+```{r}
+#Run PC
+# nonNA_across_allpp <- og_tb %>% select(aamdc:zpr1) %>% drop_na() #749 of the 49k individuals have non-NA values across
+# pca_obj <- prcomp(nonNA_across_allpp, na.action='na.omit', center=T, scale=T)
+# 
+# new_pc_scores <- predict(pca_obj, newdata = og_tb %>% select(aamdc:zpr1))
+# rm(new_pc_scores)
+# # Extract only PC1, PC2, and PC3
+# new_pc_scores_pc1to3 <- as_tibble(new_pc_scores[, 1:3])
+
+```
+
+
+```{r}
+phenos_to_compare <- c('age', 'ntprobnp','hrc')
+
+dist_plotter <- function(pheno, input_tb, output_folder='OUTPUT/UKB/PLOTS/0_EDA/3_HCM_SUBSET_COMP/'){
+  
+  medians <- input_tb %>%
+    group_by(hcm_instance) %>%
+    summarise(median_value = median(eval(parse(text=pheno)),na.rm=T), .groups = "drop")
+  
+  wilcox_result<- wilcox.test(filter(input_tb,hcm_instance=='<5Y Case')[[pheno]], filter(input_tb, hcm_instance=='>5Y Case')[[pheno]], conf.int=T)
+  
+  p_value <- wilcox_result$p.value
+
+  # Extract confidence interval
+  conf_int <- wilcox_result$conf.int
+  
+  # Print results
+  print(paste("P-value:", p_value))
+  print(paste("Confidence Interval:", conf_int[1], "to", conf_int[2]))
+  
+  density_plot <- ggplot(input_tb, aes(x=eval(parse(text=pheno))))+
+    geom_density(aes(fill=hcm_instance), alpha=0.5)+
+    geom_vline(data = medians, aes(xintercept = median_value, color = hcm_instance), linetype = "dashed", linewidth = 0.5) +
+    ylab('Density')+
+    xlab(str_to_upper(pheno))+
+    labs(caption = str_c('Wilcoxon Test between Case Subgroups: p-value = ', signif(p_value,digits=3), ' and 95% CI = [',signif(conf_int[1],digits=3), ',',signif(conf_int[2],digits=3),']'))+
+    labs(fill='HCM Status', color='HCM Status')+
+    scale_fill_brewer(palette='Set1')+
+    scale_color_brewer(palette='Set1')
+    
+  print(density_plot)
+  
+  if(isFALSE(dir.exists(output_folder))){
+    dir.create(output_folder)
+  }
+  
+  ggsave(str_c(output_folder, pheno, '_hcm_subset_comp.png'),density_plot, dpi=600)
+}
+
+walk(phenos_to_compare, ~dist_plotter(., og_tb))
+
+```
+
+
 
 
 # Case-Control Evaluation of Plasma Proteins in UKB
@@ -958,7 +1058,7 @@ walk2(ora_results, c(ontologies, 'KEGG'), ~enrich_plotter(.x, path, .y))
 
 # Cox Regression for Incident HCM Diagnosis
 
-I also perform Cox regression to evaluate associations of plasma proteins with **incident** diagnosis of HCM in all of UKB-PPP (excluding baseline instance 0 cases of HCM).
+I also perform Cox regression to evaluate associations of plasma proteins with **incident** diagnosis of HCM in all of UKB-PPP (excluding cases of HCM at baseline or within instance 5Y).
 N.B This is almost a separate script so run straight from here without prior ones
 
 ```{r import}
@@ -969,6 +1069,9 @@ library(survival)
 instance <- '2_5Y'
 rcmm_cov<- T
 include_nonCM_panels=T
+
+# pp_scaling <- 'scale' #This flag is used if you want to flag the scales via scale()
+pp_scaling <- 'ranknorm'
 
 ukb_cases_total <- read_tsv('DATA/UKB/RAP/Cases/ukb_rap_HCM_20240209.csv')
 
@@ -987,6 +1090,26 @@ if(isTRUE(include_nonCM_panels)){
   select(-hcm)
 }
 
+if (pp_scaling == 'scale'){
+  pp <- ukb_pp %>% select('nppb':'npc2') %>%
+    scale()
+  
+  ukb_pp <- ukb_pp %>%
+    select(-('nppb':'npc2')) %>%
+    bind_cols(pp)
+  rm(pp)
+  
+}else if (pp_scaling == 'ranknorm'){
+  ukb_pp <- ukb_pp %>%
+    mutate(across(nppb:npc2, ~ replace(., !is.na(.), RNOmni::RankNorm(.[!is.na(.)]))))
+}
+
+if (isTRUE(rcmm_cov)){
+   extra_folders <- 'rcmm_cov/'
+}
+if(isTRUE(include_nonCM_panels)){
+  extra_folders <- str_c(extra_folders, 'allpanels/')
+} 
 
 hcm_tb2 <- readRDS('DATA/UKB/PROCESSED/3_TOTAL/ukb_diagnosis_dates_minimum.rds') #Min_diag_date2 refers to earliest diagnosis date of HCM from either self-reported; hospital or death cause record
 
@@ -1006,6 +1129,8 @@ ukb_diag_cox_tb <- ukb_diag_cox_tb %>%
   rowwise() %>%
   mutate(incidenthcm_age = (ifelse(incidenthcm_status==T, time_length(min_diag_date2-dob_approx, unit='year'), min(datasetversion_age, death_age, lost_age, na.rm=T)))) %>% #Add in incident_hcm_age = if status, that will be min_diag_date2 and if not, then it will be the age at dataset version or lost to followup
   ungroup()
+
+write_tsv(ukb_diag_cox_tb, str_c('DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_HCMdiagCox_pp', pp_scaling, '.tsv'))
 ```
 
 ## Multivariate Cox
@@ -1085,14 +1210,14 @@ multivariate_cox_results <- multivariate_cox_results %>%
   unique() %>%
   dplyr::rename(Label=Target)
 
-saveRDS(multivariate_cox_results, str_c('OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instance,'/',extra_folders,'/allcmpp_mvCox_results.rds'))
+saveRDS(multivariate_cox_results, str_c('OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instance,'/',extra_folders,'/allcmpp_mvCox_results_pp',pp_scaling, '.rds'))
 
 
 # multivariate_cox_results <- readRDS(str_c('OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instance,'/allcmpp_mvCox_results.rds'))
 ```
 
 ```{r}
-multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, FDR=5, specific_label=F){
+multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, pp_scaling, FDR=5, specific_label=F){
   
   if (!is.numeric(FDR)){ #Apply Bonferroni
     pval_threshold = 0.05/nrow(multivariate_results)
@@ -1121,7 +1246,7 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
     scale_colour_manual(name=ifelse(isFALSE(specific_label),'MTC Significant','PP of Interest'),values=c('FALSE'='grey','TRUE'='red'))+
     geom_text_repel(aes(label=Label), nudge_y=15, max.overlaps=40)+
     #geom_errorbarh(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor),alpha=0.75, height=0.1)+
-    xlab('Hazard Ratio')+
+    xlab(ifelse(isFALSE(pp_scaling),'Hazard Ratio', 'Hazard Ratio per SD'))+
     ylab(ifelse(mtc=='Bonferroni','-log10 (Wald-test p value)', '-log10 (Adjusted Wald-test p value)'))+
     scale_x_continuous(n.breaks=10)+
     labs(title=str_wrap(str_c('Multivariate Cox Regression analysis for ', nrow(multivariate_results), ' plasma protein predictors')),caption=str_c(mtc, ' p-value Threshold Indicated'))+
@@ -1138,16 +1263,161 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
 ```{r}
 path <- str_c('./OUTPUT/UKB/PLOTS/5_CoxHCMDiag/', instance,'/',extra_folders,'/')
 
-mvcox_incidentHCM_fdr5 <- multivariate_coxph_plotter(multivariate_cox_results, path, 'allCMpp_incidentHCMdiag_fdr5')
-multivariate_coxph_plotter(multivariate_cox_results, path, 'allCMpp_incidentHCMdiag_fdr1', FDR=1)
-multivariate_coxph_plotter(multivariate_cox_results, path, 'allCMpp_incidentHCMdiag_bonferroni', FDR=F)
+mvcox_incidentHCM_fdr5 <- multivariate_coxph_plotter(multivariate_cox_results, path, str_c('allCMpp_incidentHCMdiag_fdr5_pp',pp_scaling), pp_scaling=pp_scaling)
+multivariate_coxph_plotter(multivariate_cox_results, path, str_c('allCMpp_incidentHCMdiag_fdr1_pp',pp_scaling), FDR=1, pp_scaling=pp_scaling)
+multivariate_coxph_plotter(multivariate_cox_results, path, str_c('allCMpp_incidentHCMdiag_bonferroni_pp', pp_scaling), FDR=F, pp_scaling=pp_scaling)
 
 #Write out 
 write_tsv(dplyr::select(filter(ukb_pp_list, ukb_fieldname_equivalent %in% filter(mvcox_incidentHCM_fdr5, MTC_significant==T)$var),UniProt),
-          str_c(path,'fdr5_pass_uniprotIDs.tsv'), col_names=F)
+          str_c(path,'fdr5_pass_uniprotIDs_pp',pp_scaling,'.tsv'), col_names=F)
 
 rm(path,gap)
 ```
+
+## Kaplan-Meier Analysis
+
+This compares the top 25% vs. the bottom 75% using Kaplan Meier using the target variable of incident HCM diagnosis.
+
+```{r}
+#Split the top 25% and bottom 75%
+
+contvar_binner <- function(input_tb, variable, threshold, signif=F){ #Assumes split into two groups
+  newcolname <- str_c(variable,'_categorical')
+  
+  output <- mutate(input_tb,
+                   temp=ifelse(eval(parse(text=variable)) >= threshold, str_c('>= ', threshold), str_c('< ', threshold)))
+  colnames(output)[ncol(output)] <- newcolname
+  
+  return(output)
+}
+
+ukb_diag_cox_tb <- contvar_binner(ukb_diag_cox_tb, 'ntprobnp', signif(quantile(ukb_diag_cox_tb$ntprobnp,probs=0.75,na.rm=T),3)) %>%
+  contvar_binner('hrc',signif(quantile(ukb_diag_cox_tb$hrc,probs=0.75,na.rm=T),3))
+```
+
+
+```{r}
+km_survival_curv_plotter <- function(input_tb, categorical_var, status, outcome_var, plot_output_folder){ #outcome_var = Define the column for age at first occurence of selected outcome of interest
+  
+  print(str_c('Plotting Kaplan Meier survival curves for', deparse(substitute(categorical_var)),sep=' '))
+    
+    plot_types <- c('event')
+    
+    for (type in plot_types){
+    
+      params <- list(fun.time = substitute(outcome_var),
+    fun.event = substitute(status),
+    grouping = substitute(categorical_var), 
+    fun.dat = substitute(input_tb),
+    type=type)
+          
+          plot <- substitute(ggsurvplot(
+      fit= survfit(Surv(time = fun.time, event = fun.event) ~ grouping, data = fun.dat),
+      fun=type,
+      pval=T, conf.int=T, risk.table='abs_pct',risk.table.col='strata',linetype='strata', surv.median.line='hv',xlab='Age',ncensor.plot=T,ylim=c(0,0.025)), params)
+    
+    plot <- eval.parent(plot)
+  
+    print(plot)
+    
+    if (isFALSE(dir.exists(plot_output_folder))){
+      dir.create(plot_output_folder, recursive=T)
+    }
+    
+    pdf(str_c(plot_output_folder,deparse(substitute(categorical_var)),'_kaplan_',type,'.pdf'), width=12, height=9)
+    print(plot, newpage=F)
+    dev.off()
+    }
+}
+```
+
+
+```{r kaplan_meier, fig.width=9, fig.height=10, message=F, warning=F}
+outcomes_of_interest <- c('incidenthcm_age')
+
+if(isTRUE(rcmm_cov)){
+  plotpaths <- str_c('./OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instance,'/KM/', outcomes_of_interest,'/rcmm_cov/') #Need to run separate results because 103 cases -> 100 cases when using expanded covariates
+} else{
+  plotpaths <- str_c('./OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instance,'/KM/', outcomes_of_interest,'/') 
+}
+
+
+#Run for UKB - Overall Composite
+km_survival_curv_plotter(ukb_diag_cox_tb,sex,incidenthcm_status,incidenthcm_age, plotpaths[1]) #Using sex
+km_survival_curv_plotter(ukb_diag_cox_tb,ntprobnp_categorical,incidenthcm_status,incidenthcm_age, plotpaths[1]) #Using sex #Using top 25% vs. bottom 75% of NTproBNP
+km_survival_curv_plotter(ukb_diag_cox_tb,hrc_categorical,incidenthcm_status,incidenthcm_age, plotpaths[1]) #Using sex #Using top 25% vs. bottom 75% of HRC
+
+```
+
+
+
+
+# Dataset Preparation for ML
+
+This outlines some dataset preparation for ML purposes such as addition of cv_prs to the covariate dataset.
+
+```{r}
+instance <- '2_5Y'
+
+ukb_pp <- read_tsv(str_c('DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+ukb_cv_prs <- bind_rows(
+  read_tsv('../../HCM_IntScore/ML/1_input/hcmr_ukb_agesex_train_imputedPRS_rareGRSdosage_covariates_cvprs.tsv')%>% mutate(ID = as.character(ID)),
+  read_tsv('../../HCM_IntScore/ML/1_input/hcmr_ukb_agesex_validation_imputedPRS_rareGRSdosage_covariates_cvprs.tsv')%>% mutate(ID = as.character(ID)),
+  read_tsv('../../HCM_IntScore/ML/1_input/ukb_test_imputedPRS_rareGRSdosage_covariates_cvprs.tsv') %>% mutate(ID = as.character(ID))
+) %>% 
+  filter(!str_detect(ID, 'HCR')) %>% 
+   select(ID, cv_prs, PC1:PC10) %>% 
+  mutate(ID = as.numeric(ID))
+
+ukb_pp <- ukb_pp %>%
+  left_join(ukb_cv_prs, by=c('eid'='ID'))
+```
+
+
+```{r}
+#Filter out those with NA values in cv_prs
+# ukb_pp <- ukb_pp %>%
+#   filter(!is.na(cv_prs))
+# 
+# sum(ukb_pp$hcm)
+# sum(ukb_pp$hcm ==F)
+
+# write_tsv(ukb_pp,str_c('DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_cvprs.tsv'))
+
+# rm(ukb_pp, ukb_cv_prs)
+```
+In reality, to maintain the same training and test sets are when there is no PRS added, I take the X_train and X_test datasets which have previously been split and add the cv_prs from the above tibble onto them and I rewrite it out.
+
+```{r}
+
+prs_adder <- function(prs_tb, folder_path='OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/'){
+  
+  files <- list.files(folder_path, full.names=T)
+  datasets <- map(files, ~read_csv(.) %>% mutate(index=row_number()))
+  names(datasets) <- str_match(files, str_c(folder_path,'([^\\.]+)\\.csv'))[,2]
+  
+  #Add the prs to each of the two datasets but can't do so by ID because ID lost in X_train and X_test so instead need to align the 10 genetic PCs
+  
+  X_datasets <- c(datasets['X_train'],datasets['X_test'])
+  y_datasets <- c(datasets['y_train'],datasets['y_test'])
+  rm(datasets)
+  
+  #Rename the prs_tb PC columns
+  colnames(prs_tb) <- c('ID','cv_prs', str_c('pc',1:10))
+  
+  joined_tbs <- map(X_datasets, ~left_join(., prs_tb, by=str_c('pc',1:10)))
+  
+  
+}
+
+
+prs_X_train <- hcm_cc_5y_X_train %>%
+  left_join(ukb_cv_prs, by = )
+
+#Filter for those without cv_prs
+
+```
+
 
 
 # Archive
