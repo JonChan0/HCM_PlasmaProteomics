@@ -169,6 +169,11 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     X_train_preprocessed = pipeline.named_steps['feature_preprocessor'].fit_transform(X_train_preprocessed)
     base_folder = os.path.dirname(X_train_data_path)
     preprocessed_data_path = os.path.join(base_folder, f'X_train_preprocessed_{model_name}.csv')
+
+    #If feature_selection is specified, also append the preprocessed_data_path with _no_fs
+    if feature_selection == 'False':
+        preprocessed_data_path = preprocessed_data_path.replace('.csv', '_no_fs.csv')
+
     pd.DataFrame(X_train_preprocessed, columns=pipeline.named_steps['feature_preprocessor'].get_feature_names_out()).to_csv(preprocessed_data_path, index=False)
     print(f"Preprocessed X_train data saved to {preprocessed_data_path}")
     wandb.log({"status": "Saved preprocessed training data"})
@@ -191,7 +196,13 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
 
     # Print the best parameters and best score
     print(f"Best parameters found for {model.__class__.__name__}: ", grid_search.best_params_)
-    print(f"Best cross-validation AUC for {model.__class__.__name__}: ", grid_search.best_score_)
+    print(f"Best mean cross-validation AUC for {model.__class__.__name__}: ", grid_search.best_score_)
+
+    #Save the cv_results of the grid search object as well
+    cv_results_path = os.path.join(model_output_folder, f'{model_name}_cv_results.csv')
+    pd.DataFrame(grid_search.cv_results_).to_csv(cv_results_path, index=False)
+    print(f"CV results saved to {cv_results_path}")
+    wandb.log('CV results saved')
 
     # Save the best estimator
     model_path = os.path.join(model_output_folder, f'{model_name}_best_model.pkl')
@@ -217,6 +228,11 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
 
 # Function to plot metrics
 def plot_metrics(model, X, y, dataset_name, model_name, plot_output_folder):
+
+    #If plot_output_folder does not exist, create it:
+    if not os.path.exists(plot_output_folder):
+        os.makedirs(plot_output_folder)
+    
     y_pred = model.predict(X)
     y_pred_proba = model.predict_proba(X)[:, 1]
 
@@ -299,6 +315,11 @@ if __name__ == "__main__":
         "model_output_folder": args.model_output_folder,
         "feature_selection": args.feature_selection
     })
+
+    #If plotting output folder does not exist, create it
+    if not os.path.exists(args.plot_output_folder):
+        os.makedirs(args.plot_output_folder)
+
 
     print("Importing data...")
     wandb.log({"status": "Importing data"})
