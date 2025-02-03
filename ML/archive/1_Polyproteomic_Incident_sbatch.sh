@@ -21,8 +21,8 @@ target_variable='incident'
 X_train_data_path='../OUTPUT/UKB/ML/1_data/3_hcm_incident_noprs/X_train.csv'
 y_train_data_path='../OUTPUT/UKB/ML/1_data/3_hcm_incident_noprs/y_train.csv'
 
-echo 'Training model for elastic_net_logistic regression'
-python 1_Polyproteomic_ML_Train.py --model elastic_net_logistic_regression --plot_output_folder "$model_output_folder"1_LR \
+echo 'Training model for logistic regression'
+python 1_Polyproteomic_ML_Train.py --model logistic_regression --plot_output_folder "$model_output_folder"1_LR \
     --feature_selection True \
     --model_output_folder $model_output_folder \
     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
