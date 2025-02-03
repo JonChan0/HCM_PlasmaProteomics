@@ -28,12 +28,11 @@ rule data_splitting:
     params:
         data_output_folder = config['base_data_folder'] + config['folder_suffix'],
         target_variable = config['target_variable']
+    conda: 'python3.11_ml'
     threads: 2
+    resources:
+        mem_mb = lambda wildcards, threads: threads * 4000  # Example: 4000 MB per thread
     shell:'''
-        module load Miniforge3/24.1.2-0
-        eval "$(conda shell.bash hook)"
-        conda activate python3.11_ml
-
         # Set the number of threads for Python
         export OMP_NUM_THREADS=2
 
@@ -51,6 +50,9 @@ rule train:
     output:
         model_pkl_file = config['base_model_folder'] + config['folder_suffix']+"{model_name}_best_model.pkl"
     threads: 8
+    conda: 'python3.11_ml'
+    resources:
+        mem_mb = lambda wildcards, threads: threads * 4000  # Example: 4000 MB per thread
     params:
         model_output_folder=config['base_model_folder'] + config['folder_suffix'],
         plot_output_folder=lambda wildcards: config['base_model_folder'] + config['folder_suffix'] + config['model_output_names'][config['model_names'].index(wildcards.model_name)],
@@ -59,10 +61,6 @@ rule train:
         target_variable=config['target_variable'],
         feature_selection=lambda wildcards: config['feature_selection'][config['model_names'].index(wildcards.model_name)]
     shell:'''
-        module load Miniforge3/24.1.2-0
-        eval "$(conda shell.bash hook)"
-        conda activate python3.11_ml
-
         # Set the number of threads for Python
         export OMP_NUM_THREADS=8
 
@@ -84,7 +82,10 @@ rule feature_importance_plotter:
         X_preprocessed_data_path = config['base_data_folder'] + config['folder_suffix'] + 'X_train_preprocessed_{model_name}.csv'
     output:
         feature_importance_plot = config['base_plot_folder'] + config['folder_suffix'] + 'feature_importance/{wildcards.model_name}_feature_importances.png'
-
+    conda: 'python3.11_ml'
+    threads: 2
+    resources:
+        mem_mb = lambda wildcards, threads: threads * 4000  # Example: 4000 MB per thread
     params:
         output_folder =  config['base_plot_folder'] + config['folder_suffix'] + 'feature_importance/',
     shell:'''
