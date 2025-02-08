@@ -6,8 +6,6 @@ Date: 2025-01-23
 
 import os
 
-configfile: "config.yaml"
-
 rule all:
     input:
         X_train_data_path=config['base_data_folder'] + config['folder_suffix'] + "X_train.csv",
@@ -39,7 +37,7 @@ rule data_splitting:
         python 0_Polyproteomic_Data_Splitter.py \
             --data_path {input.data_path} \
             --data_output_folder {params.data_output_folder} \
-            --target_variable = {params.target_variable}
+            --target_variable {params.target_variable}
     '''
 
 #This outlines the first-pass training over the various different model types to compare different model classes 
@@ -52,7 +50,7 @@ rule train:
     threads: 8
     conda: 'python3.11_ml'
     resources:
-        mem_mb = lambda wildcards, threads: threads * 4000  # Example: 4000 MB per thread
+        mem_mb = lambda wildcards, threads: threads * 8000  # Example: 4000 MB per thread
     params:
         model_output_folder=config['base_model_folder'] + config['folder_suffix'],
         plot_output_folder=lambda wildcards: config['base_model_folder'] + config['folder_suffix'] + config['model_output_names'][config['model_names'].index(wildcards.model_name)],
@@ -65,7 +63,7 @@ rule train:
         export OMP_NUM_THREADS=8
 
         python 1_Polyproteomic_ML_Train.py \
-        --model {wildcards.model_name} \
+        --model_name {wildcards.model_name} \
         --plot_output_folder "{params.plot_output_folder}" \
         --model_output_folder "{params.model_output_folder}" \
         --feature_selection {params.feature_selection} \
@@ -76,26 +74,26 @@ rule train:
 
 #This outlines the feature importance plotting for each model type
 
-rule feature_importance_plotter:
-    input:
-        model_pkl_file = rules.train.output.model_pkl_file,
-        X_preprocessed_data_path = config['base_data_folder'] + config['folder_suffix'] + 'X_train_preprocessed_{model_name}.csv'
-    output:
-        feature_importance_plot = config['base_plot_folder'] + config['folder_suffix'] + 'feature_importance/{wildcards.model_name}_feature_importances.png'
-    conda: 'python3.11_ml'
-    threads: 2
-    resources:
-        mem_mb = lambda wildcards, threads: threads * 4000  # Example: 4000 MB per thread
-    params:
-        output_folder =  config['base_plot_folder'] + config['folder_suffix'] + 'feature_importance/',
-    shell:'''
-        module load Miniforge3/24.1.2-0
-        eval "$(conda shell.bash hook)"
-        conda activate python3.11_ml
+# rule feature_importance_plotter:
+#     input:
+#         model_pkl_file = rules.train.output.model_pkl_file,
+#         X_preprocessed_data_path = config['base_data_folder'] + config['folder_suffix'] + 'X_train_preprocessed_{model_name}.csv'
+#     output:
+#         feature_importance_plot = config['base_plot_folder'] + config['folder_suffix'] + 'feature_importance/{wildcards.model_name}_feature_importances.png'
+#     conda: 'python3.11_ml'
+#     threads: 2
+#     resources:
+#         mem_mb = lambda wildcards, threads: threads * 4000  # Example: 4000 MB per thread
+#     params:
+#         output_folder =  config['base_plot_folder'] + config['folder_suffix'] + 'feature_importance/',
+#     shell:'''
+#         module load Miniforge3/24.1.2-0
+#         eval "$(conda shell.bash hook)"
+#         conda activate python3.11_ml
 
-        python 2_Polyproteomic_FeatureImportance_Evaluator.py  \
-            --model_name {wildcards.model_name} \
-            --model_pkl_file {input.model_pkl_file} \
-            --X_data_file {input.X_preprocessed_data_path} \
-            --output_folder {params.output_folder}
-    '''
+#         python 2_Polyproteomic_FeatureImportance_Evaluator.py  \
+#             --model_name {wildcards.model_name} \
+#             --model_pkl_file {input.model_pkl_file} \
+#             --X_data_file {input.X_preprocessed_data_path} \
+#             --output_folder {params.output_folder}
+#     '''

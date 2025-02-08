@@ -29,7 +29,7 @@ pp_i0_covariates = pp_i0_covariates[~pp_i0_covariates['eid'].isin(exclusion_list
 print(pp_i0_covariates.shape) 
 
 #Extract out the X and y variables from the pp_i0_covariates dataframe where the y variable is labelled 'hcm' column and the x variable is all other columns
-if args.target_variable == 'prevalent':
+if args.target_variable in ['allcases','prevalent']:
     #Print the number of HCM cases and controls in pp_i0_covariates after exclusion
     print(pp_i0_covariates['hcm'].value_counts())
 

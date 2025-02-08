@@ -166,14 +166,9 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     ])
 
     X_train_preprocessed = pipeline.named_steps['imputer_preprocessor'].fit_transform(X_train)
-    X_train_preprocessed = pipeline.named_steps['feature_preprocessor'].fit_transform(X_train_preprocessed)
+    X_train_preprocessed = pipeline.named_steps['feature_preprocessor'].fit_transform(X_train_preprocessed, y_train)
     base_folder = os.path.dirname(X_train_data_path)
     preprocessed_data_path = os.path.join(base_folder, f'X_train_preprocessed_{model_name}.csv')
-
-    #If feature_selection is specified, also append the preprocessed_data_path with _no_fs
-    if feature_selection == 'False':
-        preprocessed_data_path = preprocessed_data_path.replace('.csv', '_no_fs.csv')
-
     pd.DataFrame(X_train_preprocessed, columns=pipeline.named_steps['feature_preprocessor'].get_feature_names_out()).to_csv(preprocessed_data_path, index=False)
     print(f"Preprocessed X_train data saved to {preprocessed_data_path}")
     wandb.log({"status": "Saved preprocessed training data"})
@@ -202,7 +197,6 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     cv_results_path = os.path.join(model_output_folder, f'{model_name}_cv_results.csv')
     pd.DataFrame(grid_search.cv_results_).to_csv(cv_results_path, index=False)
     print(f"CV results saved to {cv_results_path}")
-    wandb.log('CV results saved')
 
     # Save the best estimator
     model_path = os.path.join(model_output_folder, f'{model_name}_best_model.pkl')
@@ -292,7 +286,7 @@ def plot_metrics(model, X, y, dataset_name, model_name, plot_output_folder):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Train a model for case-control classification.')
-    parser.add_argument('--model', type=str, required=True, help="Model type: 'logistic_regression', 'random_forest', 'xgboost', 'svm'")
+    parser.add_argument('--model_name', type=str, required=True, help="Model type: 'logistic_regression', 'random_forest', 'xgboost', 'svm'")
     parser.add_argument('--plot_output_folder', type=str, required=True, help="Folder path to save the plots and model")
     parser.add_argument('--model_output_folder', type=str, required=True, help="Folder path to save the model")
     parser.add_argument('--feature_selection', type=str, required=True, help="Define whether or not feature selection is applied prior to training")
@@ -303,14 +297,14 @@ if __name__ == "__main__":
     parser.add_argument('--y_train_data', type=str, default='', help="The model data containing training data for y")
     args = parser.parse_args()
 
-    if args.target_variable == 'prevalent': # Initialize wandb with a project name based on the model type
-        wandb.init(project=f"polyproteomic_casecontrol_{args.model}")
+    if args.target_variable in ['allcases','prevalent']: # Initialize wandb with a project name based on the model type
+        wandb.init(project=f"polyproteomic_casecontrol_{args.model_name}")
     elif args.target_variable == 'incident':
-        wandb.init(project=f"polyproteomic_incident_{args.model}")
+        wandb.init(project=f"polyproteomic_incident_{args.model_name}")
 
     # Log configuration parameters
     wandb.config.update({
-        "model_type": args.model,
+        "model_type": args.model_name,
         "plot_output_folder": args.plot_output_folder,
         "model_output_folder": args.model_output_folder,
         "feature_selection": args.feature_selection
@@ -355,13 +349,17 @@ if __name__ == "__main__":
         features_to_select_fs = []
 
     # Get the model and parameter grid based on user input
-    model, param_grid = get_model_and_params(args.model)
+    model, param_grid = get_model_and_params(args.model_name)
 
     # Log the parameter grid to wandb config
     wandb.config.update(param_grid)
 
+    #If feature_selection is False, append '_nofs' to the model name
+    if args.feature_selection == 'False':
+        args.model_name = args.model_name + '_nofs'
+
     # Train the model
-    trained_model = train_model(X_train, y_train, model, param_grid, args.model, args.model_output_folder, args.X_train_data, args.feature_selection, features_to_bypass_fs, features_to_select_fs)
+    trained_model = train_model(X_train, y_train, model, param_grid, args.model_name, args.model_output_folder, args.X_train_data, args.feature_selection, features_to_bypass_fs, features_to_select_fs)
 
     # Plot metrics for the training set
-    plot_metrics(trained_model, X_train, y_train, "Training", args.model, args.plot_output_folder)
+    plot_metrics(trained_model, X_train, y_train, "Training", args.model_name, args.plot_output_folder)

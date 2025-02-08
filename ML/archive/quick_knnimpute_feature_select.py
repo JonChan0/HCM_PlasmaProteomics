@@ -16,7 +16,7 @@ pp_names = pd.read_csv('../DATA/UKB/ML/2_covariates_pp/ML_pp_names.csv').loc[:, 
 imputer = ColumnTransformer([('knn_imputer', KNNImputer(n_neighbors=5) ,pp_names)],verbose_feature_names_out=False)
 
 X_all_ppimputed = imputer.fit_transform(X_all)
-X_all_ppimputed.head()
+print(X_all_ppimputed.head())
 
 X_all_ppimputed.to_csv('../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_all_ppimputed.csv', index=False)
 

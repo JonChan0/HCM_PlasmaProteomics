@@ -1418,6 +1418,9 @@ prs_X_train <- hcm_cc_5y_X_train %>%
 
 ```
 
+```{r}
+sessionInfo()
+```
 
 
 # Archive
