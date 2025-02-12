@@ -169,6 +169,11 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     X_train_preprocessed = pipeline.named_steps['feature_preprocessor'].fit_transform(X_train_preprocessed, y_train)
     base_folder = os.path.dirname(X_train_data_path)
     preprocessed_data_path = os.path.join(base_folder, f'X_train_preprocessed_{model_name}.csv')
+
+    #If feature_selection is specified, also append the preprocessed_data_path with _no_fs
+    if feature_selection == 'False':
+        preprocessed_data_path = preprocessed_data_path.replace('.csv', '_no_fs.csv')
+
     pd.DataFrame(X_train_preprocessed, columns=pipeline.named_steps['feature_preprocessor'].get_feature_names_out()).to_csv(preprocessed_data_path, index=False)
     print(f"Preprocessed X_train data saved to {preprocessed_data_path}")
     wandb.log({"status": "Saved preprocessed training data"})
