@@ -16,9 +16,9 @@ export OMP_NUM_THREADS=2
 echo 'Performing inference on test set and evaluating test set performance'
 python 3_Polyproteomic_TestSet_Evaluator.py \
     --model_name xgboost \
-    --model_path ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/xgboost_best_model.pkl \
-    --plot_output_path ../OUTPUT/UKB/ML/3_summary_plots/test_set_inference \
-    --X_test_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_test.csv \
-    --y_test_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/y_test.csv \
+    --model_path ../OUTPUT/UKB/ML/2_models/5_hcm_allcases_noprs/xgboost_best_model.pkl \
+    --plot_output_path ../OUTPUT/UKB/ML/3_summary_plots/test_set_inference/5_hcm_allcases_noprs/ \
+    --X_test_path ../OUTPUT/UKB/ML/1_data/5_hcm_allcases_noprs/X_test.csv \
+    --y_test_path ../OUTPUT/UKB/ML/1_data/5_hcm_allcases_noprs/y_test.csv \
     --n_bootstraps 1000 \
     --random_seed 42
