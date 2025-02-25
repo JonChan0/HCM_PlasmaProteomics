@@ -403,23 +403,30 @@ dist_plotter <- function(pheno, input_tb, output_folder='OUTPUT/UKB/PLOTS/0_EDA/
     group_by(hcm_instance) %>%
     summarise(median_value = median(eval(parse(text=pheno)),na.rm=T), .groups = "drop")
   
-  wilcox_result<- wilcox.test(filter(input_tb,hcm_instance=='<5Y Case')[[pheno]], filter(input_tb, hcm_instance=='>5Y Case')[[pheno]], conf.int=T)
+  case_vs_case_wilcox_result<- wilcox.test(filter(input_tb,hcm_instance=='<5Y Case')[[pheno]], filter(input_tb, hcm_instance=='>5Y Case')[[pheno]], conf.int=T)
   
-  p_value <- wilcox_result$p.value
-
-  # Extract confidence interval
-  conf_int <- wilcox_result$conf.int
+  p_value1 <- case_vs_case_wilcox_result$p.value
+  conf_int1 <- case_vs_case_wilcox_result$conf.int
+  
+  # Print results for case vs. case
+  print(paste("P-value (Prevalent vs. Incident Cases):", p_value1))
+  print(paste("Confidence Interval:", conf_int1[1], "to", conf_int1[2]))
+  
+  incident_vs_control_wilcox_result<- wilcox.test(filter(input_tb,hcm_instance=='Control')[[pheno]], filter(input_tb, hcm_instance=='>5Y Case')[[pheno]], conf.int=T)
+  
+  p_value2 <- incident_vs_control_wilcox_result$p.value
+  conf_int2 <- incident_vs_control_wilcox_result$conf.int
   
   # Print results
-  print(paste("P-value:", p_value))
-  print(paste("Confidence Interval:", conf_int[1], "to", conf_int[2]))
+  print(paste("P-value (Incident vs. Controls):", p_value2))
+  print(paste("Confidence Interval:", conf_int2[1], "to", conf_int2[2]))
   
   density_plot <- ggplot(input_tb, aes(x=eval(parse(text=pheno))))+
     geom_density(aes(fill=hcm_instance), alpha=0.5)+
     geom_vline(data = medians, aes(xintercept = median_value, color = hcm_instance), linetype = "dashed", linewidth = 0.5) +
     ylab('Density')+
     xlab(str_to_upper(pheno))+
-    labs(caption = str_c('Wilcoxon Test between Case Subgroups: p-value = ', signif(p_value,digits=3), ' and 95% CI = [',signif(conf_int[1],digits=3), ',',signif(conf_int[2],digits=3),']'))+
+    labs(caption = str_c('Wilcoxon Test between Case Subgroups: p-value = ', signif(p_value1,digits=3), ' and 95% CI = [',signif(conf_int1[1],digits=3), ',',signif(conf_int1[2],digits=3),']','\n Wilocoxon Test between >5Y Cases & Controls: p-value = ', signif(p_value2,digits=3), ' and 95% CI = [',signif(conf_int2[1],digits=3), ',',signif(conf_int2[2],digits=3),']'))+
     labs(fill='HCM Status', color='HCM Status')+
     scale_fill_brewer(palette='Set1')+
     scale_color_brewer(palette='Set1')
