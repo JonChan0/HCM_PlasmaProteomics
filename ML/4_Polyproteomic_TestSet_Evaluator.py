@@ -138,6 +138,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, required=True, help='Path to the saved model .pkl file')
     parser.add_argument('--X_test_path', type=str, required=True, help='Path to the X_test.csv file')
     parser.add_argument('--y_test_path', type=str, required=True, help='Path to the y_test.csv file')
+    parser.add_argument('--x_all_imputedpp_path', type=str, required=True, help='Path to the X_all_imputedpp.csv file')
     parser.add_argument('--plot_output_path', type=str, required=True, help='Path to save the output plots')
     parser.add_argument('--model_name', type=str, required=True, help='Name of the model for plot titles and filenames') 
     parser.add_argument('--n_bootstraps', type=int, default=1000, help='Number of bootstrap samples for AUC confidence interval')
@@ -155,8 +156,24 @@ if __name__ == '__main__':
     
     evaluate_model(model, X_test, y_test, args.plot_output_path, args.model_name, args.n_bootstraps, args.random_seed)
 
+    #Import in the x_all_imputedpp_path which contains EID and all imputed plasma protein values (without scaling)
+    X_all_ppimputed = pd.read_csv(args.x_all_imputedpp_path)
+    #Filter for only the eid values in X_test
+    X_all_ppimputed = X_all_ppimputed[X_all_ppimputed['eid'].isin(X_test['eid'])]
+    
+    #Filter the X_all_ppimputed for the features in feature_names
+    preprocessor2 = model.named_steps['feature_preprocessor']
+    feature_names = preprocessor2.get_feature_names_out()
+
+    X_all_ppimputed_feature_selected = X_all_ppimputed[[feature_names]] #Also drops the eid column from the X_all_ppimputed
+
+    #Remove all the columns in X_test that are also in X_all_ppimputed
+    X_test = X_test.drop(columns=X_all_ppimputed_feature_selected.columns)
+    #Bind_cols from R the X_test with the X_all_ppimputed_feature_selected i.e assume that the order of the rows is the same
+    X_test = pd.concat([X_test, X_all_ppimputed_feature_selected], axis=1)
+
     #Need to apply the fit_transform to output the preprocessed X_test data
     X_test_preprocessed = model.named_steps['imputer_preprocessor'].fit_transform(X_test)
-    X_test_preprocessed = model.named_steps['feature_preprocessor'].fit_transform(X_test_preprocessed, y_test)
+    X_test_preprocessed = model.named_steps['feature_preprocessor'].fit_transform(X_test_preprocessed, y_test) #But need to remove the feature_selection step
 
     compute_shap_values(model.named_steps['classifier'], X_test_preprocessed, args.plot_output_path, args.model_name)
