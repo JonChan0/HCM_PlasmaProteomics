@@ -16,16 +16,12 @@ pp_names = pd.read_csv('../DATA/UKB/ML/2_covariates_pp/ML_pp_names.csv').loc[:, 
 imputer = ColumnTransformer([('knn_imputer', KNNImputer(n_neighbors=5) ,pp_names)],verbose_feature_names_out=False)
 
 X_all_ppimputed = imputer.fit_transform(X_all)
+
+#Add the 'eid' column back to the dataframe
+X_all_ppimputed = pd.DataFrame(X_all_ppimputed, columns=pp_names)
+X_all_ppimputed['eid'] = X_all['eid']
+
 print(X_all_ppimputed.head())
 
 X_all_ppimputed.to_csv('../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_all_ppimputed.csv', index=False)
 
-model = joblib.load('../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/xgboost_best_model.pkl')
-
-preprocessor2 = model.named_steps['feature_preprocessor']
-feature_names = preprocessor2.get_feature_names_out()
-
-#Filter the X_all_ppimputed for the features in feature_names
-
-X_all_ppimputed_feature_selected = X_all_ppimputed[['eid',feature_names]]
-X_all_ppimputed_feature_selected.to_csv('../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_all_ppimputed_feature_selected.csv', index=False)
