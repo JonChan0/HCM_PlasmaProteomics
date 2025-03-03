@@ -3,7 +3,7 @@ import joblib
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import accuracy_score, roc_curve, auc, precision_recall_curve, confusion_matrix, f1_score
+from sklearn.metrics import balanced_accuracy_score, roc_curve, auc, precision_recall_curve, confusion_matrix, f1_score
 import xgboost as xgb
 from xgboost import XGBClassifier
 from sklearn.pipeline import Pipeline
@@ -32,11 +32,11 @@ def evaluate_model(model, X_test, y_test, plot_output_path, model_name, n_bootst
     y_pred = model.predict(X_test)
     
     # Calculate metrics
-    accuracy = accuracy_score(y_test, y_pred)
+    balanced_accuracy = balanced_accuracy_score(y_test, y_pred)
     f1 = f1_score(y_test, y_pred)
     
     # Print metrics
-    print(f'Accuracy: {accuracy}')
+    print(f'Balanced Accuracy: {balanced_accuracy}')
     print(f'F1 Score: {f1}')
 
     # Check lengths of y_test and y_prob
@@ -86,16 +86,18 @@ def evaluate_model(model, X_test, y_test, plot_output_path, model_name, n_bootst
         plt.savefig(f'{plot_output_path}/{model_name}_confusion_matrix_{threshold}.png')
         plt.close()
     
-    # Plot precision-recall curve
+    # Plot precision-recall curve and add a label to show the average_precision score (i.e PR-AUC)
     precision, recall, _ = precision_recall_curve(y_test, y_prob)
+    average_precision = auc(recall, precision)
     plt.figure(figsize=(8, 6))
-    plt.plot(recall, precision, marker='.')
+    plt.plot(recall, precision, marker='.', label=f'AP = {average_precision:.2f}')
     plt.title(f'{model_name} Precision-Recall Curve')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
+    plt.legend()
     plt.savefig(f'{plot_output_path}/{model_name}_precision_recall_curve.png')
     plt.close()
-    
+
     # Plot ROC curve with AUC
     fpr, tpr, _ = roc_curve(y_test, y_prob)
     roc_auc = auc(fpr, tpr)
@@ -107,31 +109,6 @@ def evaluate_model(model, X_test, y_test, plot_output_path, model_name, n_bootst
     plt.legend()
     plt.savefig(f'{plot_output_path}/{model_name}_roc_curve.png')
     plt.close()
-
-def compute_shap_values(model, X_test, plot_output_path, model_name):
-    """
-    Compute SHAP values for relative feature importance for the XGBClassifier model.
-    
-    Parameters:
-    - model: Trained XGBClassifier model
-    - X_test: Test set features
-    - plot_output_path: Path to save the SHAP plot
-    - model_name: Name of the model for plot title
-    """
-    explainer = shap.Explainer(model)
-    shap_values = explainer(X_test)
-    
-    # Plot SHAP summary
-    plt.figure(figsize=(10, 8))
-    shap.summary_plot(shap_values, X_test, show=False)
-    plt.title(f'{model_name} SHAP Summary Plot')
-    plt.savefig(f'{plot_output_path}/{model_name}_shap_summary.png')
-    plt.close()
-    
-    # Save SHAP values to CSV
-    shap_values_df = pd.DataFrame(shap_values.values, columns=X_test.columns)
-    shap_values_df.to_csv(f'{plot_output_path}/{model_name}_shap_values.csv', index=False)
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate a saved model on a test set and output performance plots.')
@@ -156,24 +133,24 @@ if __name__ == '__main__':
     
     evaluate_model(model, X_test, y_test, args.plot_output_path, args.model_name, args.n_bootstraps, args.random_seed)
 
-    #Import in the x_all_imputedpp_path which contains EID and all imputed plasma protein values (without scaling)
-    X_all_ppimputed = pd.read_csv(args.x_all_imputedpp_path)
-    #Filter for only the eid values in X_test
-    X_all_ppimputed = X_all_ppimputed[X_all_ppimputed['eid'].isin(X_test['eid'])]
+    # #Import in the x_all_imputedpp_path which contains EID and all imputed plasma protein values (without scaling)
+    # X_all_ppimputed = pd.read_csv(args.x_all_imputedpp_path)
+    # #Filter for only the eid values in X_test
+    # X_all_ppimputed = X_all_ppimputed[X_all_ppimputed['eid'].isin(X_test['eid'])]
     
-    #Filter the X_all_ppimputed for the features in feature_names
-    preprocessor2 = model.named_steps['feature_preprocessor']
-    feature_names = preprocessor2.get_feature_names_out()
+    # #Filter the X_all_ppimputed for the features in feature_names
+    # preprocessor2 = model.named_steps['feature_preprocessor']
+    # feature_names = preprocessor2.get_feature_names_out()
 
-    X_all_ppimputed_feature_selected = X_all_ppimputed[[feature_names]] #Also drops the eid column from the X_all_ppimputed
+    # X_all_ppimputed_feature_selected = X_all_ppimputed[[feature_names]] #Also drops the eid column from the X_all_ppimputed
 
-    #Remove all the columns in X_test that are also in X_all_ppimputed
-    X_test = X_test.drop(columns=X_all_ppimputed_feature_selected.columns)
-    #Bind_cols from R the X_test with the X_all_ppimputed_feature_selected i.e assume that the order of the rows is the same
-    X_test = pd.concat([X_test, X_all_ppimputed_feature_selected], axis=1)
+    # #Remove all the columns in X_test that are also in X_all_ppimputed
+    # X_test = X_test.drop(columns=X_all_ppimputed_feature_selected.columns)
+    # #Bind_cols from R the X_test with the X_all_ppimputed_feature_selected i.e assume that the order of the rows is the same
+    # X_test = pd.concat([X_test, X_all_ppimputed_feature_selected], axis=1)
 
-    #Need to apply the fit_transform to output the preprocessed X_test data
-    X_test_preprocessed = model.named_steps['imputer_preprocessor'].fit_transform(X_test)
-    X_test_preprocessed = model.named_steps['feature_preprocessor'].fit_transform(X_test_preprocessed, y_test) #But need to remove the feature_selection step
+    # #Need to apply the fit_transform to output the preprocessed X_test data
+    # X_test_preprocessed = model.named_steps['imputer_preprocessor'].fit_transform(X_test)
+    # X_test_preprocessed = model.named_steps['feature_preprocessor'].fit_transform(X_test_preprocessed, y_test) #But need to remove the feature_selection step
 
-    compute_shap_values(model.named_steps['classifier'], X_test_preprocessed, args.plot_output_path, args.model_name)
+    # compute_shap_values(model.named_steps['classifier'], X_test_preprocessed, args.plot_output_path, args.model_name)
