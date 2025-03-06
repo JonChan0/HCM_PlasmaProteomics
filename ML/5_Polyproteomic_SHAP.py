@@ -167,18 +167,23 @@ if __name__ == "__main__":
     shap_values = explainer(X)
 
     # Plot SHAP summary plot for all features in the model
-    plot_shap_plots(shap_values, args.model_name, len(X.columns), args.plot_output_path)
+    if len(X.columns) <= 50: #Only plot all the features if the number of total features is <= 50
+        plot_shap_plots(shap_values, args.model_name, len(X.columns), args.plot_output_path)
     plot_shap_plots(shap_values, args.model_name, 10, args.plot_output_path, '_top10') #Also plot only showing top 10 features
 
     #Plot SHAP plots for only filtered features i.e plasma proteins
     pp_names = pp_names[np.isin(pp_names, X.columns.values)]
     print(f'The filtered features include {pp_names}')
     shap_values_filtered = filter_shap_values(shap_values, X.columns.values.tolist(), pp_names)
-    plot_shap_plots(shap_values_filtered, args.model_name, len(pp_names), args.plot_output_path, '_ppfiltered')
-    plot_shap_plots(shap_values_filtered, args.model_name, 10, args.plot_output_path, '_ppfiltered_top10') #Also plot only showing top 10 features
+
+    if len(pp_names) <= 50: #Only plot all the features if the number of total features is <= 50
+        plot_shap_plots(shap_values_filtered, args.model_name, len(pp_names), args.plot_output_path, '_ppfiltered')
+
+    plot_shap_plots(shap_values_filtered, args.model_name, 10, args.plot_output_path, '_ppfiltered_top10') #Also plot only showing top 10 plasma proteins
+    plot_shap_plots(shap_values_filtered, args.model_name, 30, args.plot_output_path, '_ppfiltered_top30') #Also plot only showing top 30 plasma proteins
 
     #Plot the SHAP dependence plots for the top_n_features
-    dependence_shap_plotter(shap_values_filtered, args.model_name, pp_names, args.output_folder)
+    dependence_shap_plotter(shap_values_filtered, args.model_name, pp_names, args.output_folder, top_n=5)
 
     #Plot the SHAP values against the F-ratio
     #Also plot a F-value plot vs. mean absolute SHAP value plot
