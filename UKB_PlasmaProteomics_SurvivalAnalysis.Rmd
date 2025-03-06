@@ -171,9 +171,8 @@ contvar_binner <- function(input_tb, variable, threshold, signif=F){ #Assumes sp
 }
 
 ukb_tb <- contvar_binner(ukb_tb, 'ntprobnp', signif(quantile(ukb_tb$ntprobnp,probs=0.75,na.rm=T),3)) %>%
-  contvar_binner('hrc',signif(quantile(ukb_tb$hrc,probs=0.75,na.rm=T),3))
-# %>%
-  # contvar_binner('ace2',signif(quantile(ukb_tb$hrc,probs=0.75,na.rm=T),3))
+  contvar_binner('hrc',signif(quantile(ukb_tb$hrc,probs=0.75,na.rm=T),3)) %>%
+  contvar_binner('ace2',signif(quantile(ukb_tb$ace2,probs=0.75,na.rm=T),3))
 ```
 
 
@@ -240,15 +239,21 @@ km_survival_curv_plotter(ukb_tb,sex,overallcomp_status, overallcomp_age, plotpat
 km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of NTproBNP
 km_survival_curv_plotter(ukb_tb,hrc_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of HRC
 
+# km_survival_curv_plotter(ukb_tb,ace2_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of ACE2
+
 #Run for UKB - HF Composite
 km_survival_curv_plotter(ukb_tb,sex,hfcomp_status, hfcomp_age, plotpaths[2]) #Using sex
 km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,hfcomp_status,hfcomp_age, plotpaths[2]) #Using top 25% vs. bottom 75% of NTproBNP
 km_survival_curv_plotter(ukb_tb,hrc_categorical,hfcomp_status,hfcomp_age, plotpaths[2]) #Using top 25% vs. bottom 75% of HRC
 
+# km_survival_curv_plotter(ukb_tb,ace2_categorical,hfcomp_status,hfcomp_age, plotpaths[2])
+
 #Run for UKB - VA Composite
 km_survival_curv_plotter(ukb_tb,sex,vacomp_status, vacomp_age, plotpaths[1]) #Using sex
 km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,vacomp_status,vacomp_age, plotpaths[1]) #Using top 25% vs. bottom 75% of NTproBNP
 km_survival_curv_plotter(ukb_tb,hrc_categorical,vacomp_status,vacomp_age, plotpaths[1]) #Using top 25% vs. bottom 75% of HRC
+
+# km_survival_curv_plotter(ukb_tb,ace2_categorical,vacomp_status,vacomp_age, plotpaths[1])
 
 #Run for UKB - AF
 km_survival_curv_plotter(ukb_tb,hrc_categorical,af_status,af_age, plotpaths[4]) #Using top 25% vs. bottom 75% of HRC
