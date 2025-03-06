@@ -10,7 +10,7 @@ args <- commandArgs(trailingOnly=T)
 input_folder <- args[1] #Defines the input folder of cv_results.csv
 
 #Local test code
-input_folder <- '../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/'
+# input_folder <- '../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/'
 
 #Import--------------------------------------------------------------------------
 csv_importer <- function(input_folder){
@@ -197,5 +197,5 @@ main <- function(input_folder){
   
 }
 
-main()
+main(input_folder)
 
