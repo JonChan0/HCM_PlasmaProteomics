@@ -49,34 +49,37 @@ read_rds_from_workspace_bucket <- function(export_path) {
 }
 ```
 
-This dataset is as per V7 of the Controlled Tier btw!
+This dataset is as per V8 of the Controlled Tier btw!
 
 ```{r}
-demographics_cleaned <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240911/person_00370973/person_00370973_*.csv') %>%
+
+demographics_cleaned <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/person_17818399/person_17818399_*.csv') %>%
   select(person_id, sex_at_birth, date_of_birth, race) %>%
   mutate(date_of_birth = as_datetime(date_of_birth)) %>%
   filter(sex_at_birth %in% c('Male','Female'))  #Filter for those who define their sex
 
-cardio_biomarkers <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240911/measurement_95445965/measurement_95445965_*.csv')
+cardio_biomarkers <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/measurement_88493709/measurement_88493709_*.csv')
 
-has_ehr_data <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20241128/person_22340851/person_22340851_*.csv')
+has_ehr_data <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/person_51386490/person_51386490_*.csv')
 
-hcm_diagnoses <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240911/condition_93004727/condition_93004727_*.csv')
+#This is the V2 HCM diagnoses
+hcm_diagnoses <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/condition_11913414/condition_11913414_*.csv')
 
-hf_diagnoses <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240911/condition_49968539/condition_49968539_*.csv')
+hf_diagnoses <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/condition_38834007/condition_38834007_*.csv')
 
-t2d_diagnoses <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240911/condition_74950407/condition_74950407_*.csv')
+t2d_diagnoses <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/condition_99474710/condition_99474710_*.csv')
 
-smoking_observations <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240911/observation_60899700/observation_60899700_*.csv')
 
-bmi_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240912/measurement_92917084/measurement_92917084_*.csv')
+smoking_observations <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/observation_33805075/observation_33805075_*.csv')
 
-dbp_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240912/measurement_33758345/measurement_33758345_*.csv')
+bmi_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/measurement_35181853/measurement_35181853_*.csv')
 
-zip_socioeconomic_observations <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240925/zip_code_socioeconomic_18092247/zip_code_socioeconomic_18092247_*.csv') %>%
+dbp_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/measurement_87770652/measurement_87770652_*.csv')
+
+zip_socioeconomic_observations <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/zip_code_socioeconomic_02655435/zip_code_socioeconomic_02655435_*.csv') %>%
   select(person_id, deprindex_observation_datetime=observation_datetime, deprivation_index)
 
-creatinine_hdl_ldl <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240925/measurement_97213600/measurement_97213600_*.csv')
+creatinine_hdl_ldl <- read_bq_export_from_workspace_bucket(' gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/measurement_57227741/measurement_57227741_*.csv')
 ```
 ## Transform Data
 
@@ -112,8 +115,10 @@ diagnoses_cleaned <- map2(list(hcm_diagnoses, hf_diagnoses, t2d_diagnoses), cond
 names(diagnoses_cleaned) <- condition_names
 rm(hcm_diagnoses, hf_diagnoses, t2d_diagnoses)
 
-#Filter the all_disease_conditions to unique person_ids
-disease_conditions_nonNA_personIDs <- all_disease_conditions$person_id %>% unique() #250233 individuals
+#Filter the all_disease_conditions (i.e all the people who have diseases in the entire dataset) to unique person_ids
+# all_disease_conditions <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/condition_73935620/condition_73935620_*.csv')
+# disease_conditions_nonNA_personIDs <- all_disease_conditions$person_id %>% unique() #346210 individuals
+# rm(all_disease_conditions)
 ```
 
 ### Observations Transformation/Cleaning
@@ -209,6 +214,7 @@ biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_intere
                                        T~NA))
     if(nrow(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier))) >= 1){ #See those which don't obey the harmonisation
       View(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier)))
+      harmonised_tb <- filter(harmonised_tb, !is.na(mass_multiplier), !is.na(volume_multiplier))
     }
     
     harmonised_tb <- harmonised_tb %>%
@@ -233,6 +239,7 @@ biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_intere
     
       if(nrow(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier))) >= 1){ #See those which don't obey the harmonisation
         View(filter(harmonised_tb, is.na(mass_multiplier)|is.na(volume_multiplier)))
+        harmonised_tb <- filter(harmonised_tb, !is.na(mass_multiplier), !is.na(volume_multiplier))
       }
     
         harmonised_tb <- harmonised_tb %>%
@@ -247,7 +254,7 @@ biomarker_cleaner <- function(input_tb, biomarker_of_interest, colname_of_intere
     select(person_id, operator_concept_name, value_as_number, measurement_datetime) %>%
     mutate(operator_concept_name = ifelse(operator_concept_name=='No matching concept'|is.na(operator_concept_name), '=', operator_concept_name)) %>%  #If no operator given, assume =
     filter(value_as_number >= 0) %>% #Filter out negative values for concentration
-    filter(value_as_number < upper_limit) %>% 
+    filter(value_as_number < upper_limit) %>% #Filters for all values below the upper_limit
     mutate(measurement_datetime=as_datetime(measurement_datetime)) 
   
   colnames(output_tb)[3] <- colname_of_interest
@@ -275,12 +282,18 @@ names(cardio_biomarkers_cleaned) <- biomarker_names
 I also perform some additional EDA on the outlier filtering using upper limit on the biomarkers.
 
 ```{r}
+#Plot histograms of each of the biomarkers to visualise the distrbution after using an upper limit
+
+
+walk2(cardio_biomarkers_cleaned,names(cardio_biomarkers_cleaned), ~print(hist(.x[[.y]], breaks=100)))
+
+
 biomarker_outlier_eda <- function(biomarker_name, input_tb, hcm_tb, n_sd=3){
   
   print(str_c('Running outlier EDA for ', biomarker_name))
   
   upper_thresh <- mean(input_tb[[biomarker_name]]) + n_sd * sd(input_tb[[biomarker_name]])
-  print(signif(upper_thresh),3)
+  print(str_c('Upper 3SD threshold for ', biomarker_name, ' = ', signif(upper_thresh),3))
   
   outliers <- input_tb %>%
     filter(eval(parse(text=biomarker_name)) > upper_thresh)
@@ -291,8 +304,8 @@ biomarker_outlier_eda <- function(biomarker_name, input_tb, hcm_tb, n_sd=3){
   n_nonoutliers <- length(unique(non_outliers$person_id))
   n_outliers <- length(unique(outliers$person_id))
   
-  #How many of the entire datsaet are outliers
-  print(str_c('There are', n_nonoutliers,'total individuals with', biomarker_name, '<= mean + 3SD and', n_outliers , 'total individuals as outliers i.e > mean + 3SD', sep=' '))
+  #How many of the entire dataset are outliers
+  print(str_c('There are', n_nonoutliers,'non-outlier individuals with', biomarker_name, '<= mean + ', n_sd, 'SD and', n_outliers , 'outlier i.e > mean + ', n_sd, 'SD', sep=' '))
   
     outliers <- outliers %>%
       filter(person_id %in% hcm_tb$person_id)
@@ -304,7 +317,7 @@ biomarker_outlier_eda <- function(biomarker_name, input_tb, hcm_tb, n_sd=3){
   n_hcm_outliers <- length(unique(outliers$person_id))
   
     #How many of the HCM cases in the dataset are outliers
-  print(str_c('There are', n_hcm_nonoutliers ,'HCM cases with', biomarker_name, '<= mean + 3SD and', n_hcm_outliers , 'HCM cases as outliers i.e > mean + 3SD', sep=' '))
+  print(str_c('There are', n_hcm_nonoutliers ,'HCM cases with', biomarker_name, '<= mean + ', n_sd, ' and', n_hcm_outliers , 'HCM cases as outliers i.e > mean + ', n_sd, 'SD', sep=' '))
   
   print(str_c('HCM outlier/total HCM ratio = ', n_hcm_outliers/(n_hcm_outliers + n_hcm_nonoutliers)))
   print(str_c('NonHCM outlier/total nonHCM ratio = ', n_outliers/(n_outliers + n_nonoutliers)))
@@ -323,11 +336,13 @@ This uses the arbitrary cutoff values via the elbow method upon visualisation of
 
 ```{r}
 biomarkers2 <- c('Creatinine', 'HDL','LDL')
-upper_limits2 <- c(2000,1000,3000) #This defines the upper limit for cutoff in ng/mL for each biomarker based on EDA of the transformed values
+upper_limits2 <- c(2000,1000,3000) #This defines the upper limit for cutoff in mg/dL for each biomarker based on EDA of the transformed values
 molar_masses <- c(113.12,NA,NA)
 
 creatinine_hdl_ldl_cleaned <- pmap(list(biomarkers2, upper_limits2,molar_masses), ~biomarker_cleaner(creatinine_hdl_ldl, ..1,..1,..2, chosen_conc_unit='mg/dL',molar_mass=..3))
 names(creatinine_hdl_ldl_cleaned) <- biomarkers2 
+
+walk2(creatinine_hdl_ldl_cleaned ,names(creatinine_hdl_ldl_cleaned ), ~print(hist(.x[[.y]], breaks=100)))
 
 ```
 
@@ -344,7 +359,7 @@ demo_cov <- demographics_cleaned %>%
 demo_cov <- demo_cov %>%
   mutate(race=ifelse(race %in% c('None Indicated','I prefer not to answer','PMI: Skip', 'None of these'), NA, race))
 
-#Add the deprivation index covatriate
+#Add the deprivation index covariate
 demo_cov <- demo_cov %>%
   left_join(zip_socioeconomic_observations, by='person_id')
 
@@ -415,7 +430,7 @@ bucket_rds_importer <- function(basepath, filename){
   
 }
 
-bucket_basepath <- 'gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/'
+bucket_basepath <- 'gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/'
 
 demo_cov <- bucket_rds_importer(bucket_basepath,'all_demo_bmi_dbp_deprivation.rds')
 cardio_biomarkers_cleaned_sdfiltered <- bucket_rds_importer(bucket_basepath,'all_pp_sdfiltered.rds')
@@ -714,7 +729,7 @@ cdr_importer <- function(export_path){
   
 }
   
-genetic_ancest <- cdr_importer('gs://fc-aou-datasets-controlled/v7/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv')
+genetic_ancest <- cdr_importer('gs://fc-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv')
 
 european_only_IDs <- genetic_ancest %>%
   filter(ancestry_pred == 'eur') %>%
@@ -754,7 +769,7 @@ i0_5y_na_toF <- function(input_tb){
 
 biomarker_diagnoses_demo2_lst <- map(biomarker_diagnoses_demo2_lst, ~i0_5y_na_toF(.))
 names(biomarker_diagnoses_demo2_lst) <- biomarker_names
-saveRDS(biomarker_diagnoses_demo2_lst, 'PP/DATA/biomarker_diagnoses_demo2_lst.rds')
+saveRDS(biomarker_diagnoses_demo2_lst, './DATA/biomarker_diagnoses_demo2_lst.rds')
 
 # biomarker_diagnoses_demo2_lst <- readRDS('PP/DATA/biomarker_diagnoses_demo2_lst.rds')
 ```
@@ -808,9 +823,9 @@ biomarker_diagnoses_demo3_lst <- map2(biomarker_diagnoses_demo2_lst, names(bioma
                                          rcmm_covar_extractor(creatinine_hdl_ldl_cleaned[[3]],.y, biomarkers2[3])
 )
 
-saveRDS(biomarker_diagnoses_demo3_lst, 'PP/DATA/biomarker_diagnoses_demo3_lst.rds')
+saveRDS(biomarker_diagnoses_demo3_lst, './DATA/biomarker_diagnoses_demo3_lst.rds')
 
-# biomarker_diagnoses_demo3_lst <- readRDS('PP/DATA/biomarker_diagnoses_demo3_lst.rds')
+# biomarker_diagnoses_demo3_lst <- readRDS('./DATA/biomarker_diagnoses_demo3_lst.rds')
 ```
 
 
@@ -819,22 +834,44 @@ This evaluates how many non-NA individuals exist for any combination of covariat
 
 ```{r}
 
-nonNA_checker <- function(input_tb, covariates_of_interest) {
+nonNA_checker <- function(input_tb, biomarker_name, covariates_of_interest, instance='5Y') {
   
-  print(nrow(input_tb)) #Number of initial tb
+  print(biomarker_name)
+  print(str_c('Initial total count = ',nrow(input_tb))) #Number of initial tb
   
   output_tb <- input_tb %>%
     filter(if_all(covariates_of_interest, ~!is.na(.)))
   
-  print(nrow(output_tb)) #Individuals with non-NA values in all of the covariates
+  print(str_c('After filtering for non-NA in all covariates count = ',nrow(output_tb))) #Individuals with non-NA values in all of the covariates
+  
+  #Also repeat for the number of HCM cases present before and after filtering 
+  colname = str_c('hcm_',instance,'_status', collapse='')
+  
+  print(str_c('Initial HCM case count at instance ', instance, ' = ',nrow(filter(input_tb, eval(parse(text=colname))==T)))) #Number of initial tb and HCM cases at that instance
+  
+  print(str_c('After filtering for non-NA in all covariates, HCM case count at instance ', instance,' = ',nrow(filter(output_tb, eval(parse(text=colname))==T)))) #Individuals with non-NA values in all of the covariates
+  
+  return(output_tb)
 }
 
 #This is with the OG list of covariates + deprivation index
-walk(biomarker_diagnoses_demo2_lst, ~nonNA_checker(., c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index'))) #For each of the biomarkers in biomarker_names
+walk2(biomarker_diagnoses_demo2_lst,names(biomarker_diagnoses_demo2_lst), ~nonNA_checker(.x,.y, c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index'))) #For each of the biomarkers in biomarker_names
 
 #This is with the RCMM expanded list of covariates including eGFR/HDL/LDL
-walk(biomarker_diagnoses_demo3_lst, ~nonNA_checker(., c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index', 'eGFR', 'HDL','LDL'))) #For each of the biomarkers in biomarker_names
-  
+covfiltered_biomarker_diagnoses_demo3_lst <- map2(biomarker_diagnoses_demo3_lst, names(biomarker_diagnoses_demo3_lst), ~nonNA_checker(.x,.y, c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index', 'eGFR', 'HDL','LDL'))) #For each of the biomarkers in biomarker_names
+
+#Output the total number of unique cases and controls who have at least one of the biomarkers AFTER filtering for 
+for (i in seq_along(covfiltered_biomarker_diagnoses_demo3_lst)){
+  covfiltered_biomarker_diagnoses_demo3_lst[[i]] <- select(covfiltered_biomarker_diagnoses_demo3_lst[[i]], person_id, hcm_5Y_status)
+  }
+
+test_tb <- reduce(covfiltered_biomarker_diagnoses_demo3_lst, bind_rows) %>% distinct()
+print(length(unique(test_tb$person_id))) #41595
+test_tb2 <- filter(test_tb, hcm_5Y_status==T)
+print(length(unique(test_tb2$person_id))) #546 cases
+#The nrow of test_tb is 41634 because there are 39 cases who flip flop
+
+rm(test_tb,test_tb2,covfiltered_biomarker_diagnoses_demo3_lst)
 ```
 
 ## Case-Control Analyses
@@ -1192,7 +1229,7 @@ These also correspond to the individuals with srWGS in All of Us V7 dataset.
 ```{r}
 #Import height and weight physical measurements
 
-htwt_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/bq_exports/jon126@researchallofus.org/20240919/measurement_45391419/measurement_45391419_*.csv')
+htwt_measurements <- read_bq_export_from_workspace_bucket('gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/bq_exports/jon126@researchallofus.org/20250306/measurement_23043819/measurement_23043819_*.csv')
 
 htwt_measurements <- htwt_measurements %>%
   select(person_id,value=value_as_number,standard_concept_name,measurement_datetime=measurement_datetime) %>%
@@ -1276,7 +1313,7 @@ regenie_cov2 <- select(genetic_ancest, person_id=research_id,pc1:pc10) %>%
   left_join(select(demo_cov, person_id, sex=sex_at_birth, date_of_birth), by='person_id') %>%
   left_join(htwt_measurements, by='person_id')
 
-#For their age, I take their age at the cutoff of the most recent CDR i.e V7 = 07/01/22 July 1 2022
+#For their age, I take their age at the cutoff of the most recent CDR i.e V7 = 07/01/22 
 #This would be the last date that individuals could be diagnosed with HCM and still be considered a case in the AoUS dataset.
 
 regenie_cov2 <- regenie_cov2 %>%
@@ -1315,8 +1352,8 @@ This uploads all the files in the PP folder to the GCP Bucket.
 
 ```{r}
 
-system('gsutil -m cp -r ~/DATA/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/' )
-system('gsutil -m cp -r ~/OUTPUT/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/')
+system('gsutil -m cp -r ~/DATA/ gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/' )
+system('gsutil -m cp -r ~/OUTPUT/ gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/')
 
 ```
 # EUR-Only HCM
@@ -1325,11 +1362,11 @@ This filters for only European ancestry HCM individuals as per predicted genetic
 
 ```{r}
 #Reimport in the hcm_regenie_pheno and hcm_regenie_covar files
-system('gsutil cp gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/hcm_regenie_pheno.tsv ./')
-system('gsutil cp gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/hcm_regenie_cov.tsv ./')
+system('gsutil cp gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/hcm_regenie_pheno.tsv ./DATA/')
+system('gsutil cp gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/hcm_regenie_cov.tsv ./DATA/')
 
-regenie_hcm <- read_tsv('hcm_regenie_pheno.tsv')
-regenie_cov2 <- read_tsv('hcm_regenie_cov.tsv')
+regenie_hcm <- read_tsv('DATA/hcm_regenie_pheno.tsv')
+regenie_cov2 <- read_tsv('DATA/hcm_regenie_cov.tsv')
 
 #Filter for only European ancestry 
 eur_regenie_hcm <- regenie_hcm %>% filter(IID %in% european_only_IDs$research_id)
@@ -1338,8 +1375,8 @@ write_tsv(eur_regenie_hcm, 'DATA/hcm_regenie_pheno_euronly.tsv')
 write_tsv(eur_regenie_cov2, 'DATA/hcm_regenie_cov_euronly.tsv')
 
 #Reupload
-system('gsutil cp DATA/hcm_regenie_pheno_euronly.tsv gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/')
-system('gsutil cp DATA/hcm_regenie_cov_euronly.tsv gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/')
+system('gsutil cp DATA/hcm_regenie_pheno_euronly.tsv gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/')
+system('gsutil cp DATA/hcm_regenie_cov_euronly.tsv gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/')
 ```
 
 # EDA of HCM Cases vs. Controls
@@ -1393,7 +1430,7 @@ age_sex_dist_eda <- function(bucket_basepath, pheno_filename, cov_filename, outp
   print(sex_dist)
   ggsave(str_c(output_folder, 'nomatch_sexdist',output_suffix,'.png'),sex_dist,dpi=600)
   
-  system('gsutil cp nomatch_* gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
+  system('gsutil cp nomatch_* gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/MatchIt/' )
   
   return(age_sex_hcm_cases_controls)
   
@@ -1451,8 +1488,8 @@ age_sex_matcher <- function(input_tb, case_control_ratio = 40, plot_output_path=
 matched_list <- map(c(40,100,200,250), ~age_sex_matcher(age_sex_hcm_cases_controls, case_control_ratio=.))
 matched_list_euronly <- map(c(40,100,200,250), ~age_sex_matcher(age_sex_hcm_cases_controls_euronly, case_control_ratio=., plot_output_path = './euronly/'))
 
-system('gsutil -m cp age_sex_matched_glm_* gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
-system('gsutil -m cp -r ./euronly/ gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/MatchIt/' )
+system('gsutil -m cp age_sex_matched_glm_* gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/MatchIt/' )
+system('gsutil -m cp -r ./euronly/ gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/MatchIt/' )
 ```
 
 Now extracting the matched controls to the cases for a ratio of 100 (because it performs well)
@@ -1475,7 +1512,7 @@ age_sexmatched_filewriter <- function(index_choice, input_list, regenie_pheno, r
   write_tsv(matched_regenie_pheno, output_phenoname)
   write_tsv(matched_regenie_cov, output_covname)
   
-  system(str_c('gsutil cp', output_phenoname, output_covname, 'gs://fc-secure-7953e92c-a6a6-42df-9f19-86d553a9044f/PP/DATA/', sep =' '))
+  system(str_c('gsutil cp', output_phenoname, output_covname, 'gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/', sep =' '))
 
 }
 
