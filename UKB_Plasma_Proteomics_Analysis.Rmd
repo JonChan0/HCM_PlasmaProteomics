@@ -988,7 +988,6 @@ rm(ukb_pp_hcm_cov_hf, path)
 # Gene Ontology/Pathway Analysis
 
 This prepare the gene ID lists used for gene ontology analysis via UniProt Gene IDs as per the original `olink_cm_panel` variable.
-This is for online applications e.g ShinyGO.
 
 ```{r}
 if(isTRUE(include_nonCM_panels)){
