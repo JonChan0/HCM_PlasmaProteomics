@@ -112,6 +112,7 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     features_to_select_names = [col for col in quantitative_feature_names if col in features_to_select_fs]
     features_to_bypass_names = [col for col in quantitative_feature_names if col in features_to_bypass_fs]
 
+    ###########################################################################################################
       # Check if model type is random forest or xgboost
     if model_name in ['random_forest', 'xgboost'] and feature_selection == 'True':
         bypass_pipeline = Pipeline(steps=[('pass','passthrough')])  # No scaling
@@ -125,21 +126,21 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     else: #For other model types beyond tree-based
         # Preprocessing for bypassed quantitative features (scaling)
         bypass_pipeline = Pipeline(steps=[
-            ('scaler', StandardScaler())  # Scaling
+            ('scaler', StandardScaler())  
         ])
 
         if feature_selection == 'False' or model_name in ['l1_logistic_regression', 'elastic_net_logistic_regression']:
             # Preprocessing and feature selection for selected quantitative features
             selection_pipeline = Pipeline(steps=[
-                ('scaler', StandardScaler())  # Scaling
+                ('scaler', StandardScaler()) 
             ])
         else:
               # Preprocessing and feature selection for selected quantitative features
             selection_pipeline = Pipeline(steps=[
-                ('scaler', StandardScaler()),  # Scaling
-                ('feature_selection', SelectPercentile(score_func=f_classif, percentile=1))  # Feature selection
+                ('scaler', StandardScaler()),
+                ('feature_selection', SelectPercentile(score_func=f_classif, percentile=1))  
             ])
-
+    ###########################################################################################################
     # Apply KNNImputer to all quantitative features and OneHotEncoder to all categorical and boolean features
     preprocessor_before_split = ColumnTransformer(
         transformers=[
@@ -157,7 +158,7 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
             ('boolean_pass', Pipeline(steps=[('pass','passthrough')]),boolean_feature_names)
         ],verbose_feature_names_out=False, remainder='passthrough' #This remainder = one-hot encoded categorical variables
     )
-
+    ###########################################################################################################
     # Define the final pipeline with KNNImputer applied before splitting
     pipeline = Pipeline(steps=[
         ('imputer_preprocessor', preprocessor_before_split),  # Impute all quantitative features and scale categorical features
