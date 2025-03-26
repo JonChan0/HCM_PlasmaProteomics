@@ -45,14 +45,33 @@ def plot_shap_plots(shap_values, model_name, n_features, output_folder, suffix='
     """Plot SHAP plots for the given model."""
     print(f"Plotting SHAP plots for {model_name}")
 
-    #Output shap barplot displaying all
-    shap.plots.bar(shap_values, show=False,max_display=n_features)
-    plt.title(f'Absolute SHAP Values for {n_features} features')
+    #PLOT BAR PLOT
+    # Extract feature names directly from shap_values
+    feature_names = shap_values.feature_names
+    
+    # Aggregate mean and standard deviation for each feature
+    shap_mean = np.abs(shap_values.values).mean(axis=0)
+    shap_std = np.abs(shap_values.values).std(axis=0)
+    
+    # Sort by mean magnitude
+    sorted_idx = np.argsort(shap_mean)[::-1]
+    
+    # Slice for top n features
+    shap_mean_sorted = shap_mean[sorted_idx][:n_features]
+    shap_std_sorted = shap_std[sorted_idx][:n_features]
+    feature_names_sorted = np.array(feature_names)[sorted_idx][:n_features]
+    
+    # Plot bar chart with error bars
+    plt.figure(figsize=(10, 6))
+    plt.barh(feature_names_sorted, shap_mean_sorted, xerr=shap_std_sorted, color='skyblue')
+    plt.gca().invert_yaxis()
+    plt.xlabel("Mean SHAP Value")
+    plt.title(f'Mean Absolute SHAP Values for each of {n_features} features')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder, f"{model_name}_shap_barplot{suffix}.png"))
     plt.close()
 
-    # Plot SHAP beeswarm plot
+    #PLOT BEESWARM PLOT
     shap.plots.beeswarm(shap_values, max_display=n_features, show=False)
     plt.title(f'SHAP beeswarm plot for {n_features} features')
     plt.tight_layout()
@@ -141,6 +160,7 @@ def plot_shap_vs_Fratio(mean_shap_df, fratio_df, model_name, output_folder, top_
     plt.close()
     print(f"Feature importance vs F-ratio plot saved for {model_name}")
 
+#############################################################################################
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluate a saved model on a test set and output performance plots.')
     parser.add_argument('--model_pkl_file', type=str, required=True, help='Path to the saved model .pkl file')
@@ -193,4 +213,5 @@ if __name__ == "__main__":
     fvalues = f_classif(X.loc[:,pp_names], pd.read_csv(args.y_train_path).values.ravel())[0]
     fratio_df = pd.DataFrame({'Feature': pp_names, 'F-ratio': fvalues})
     mean_shap_filtered_df = shap_to_df(shap_values_filtered)
+    mean_shap_filtered_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_mean_abs_shap_values.csv'), index=False)
     plot_shap_vs_Fratio(mean_shap_filtered_df, fratio_df, args.model_name, args.plot_output_path)
