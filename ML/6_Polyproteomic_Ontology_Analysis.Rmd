@@ -1,0 +1,93 @@
+---
+title: "6_Polyproteomic_Ontology_Analysis"
+author: "Jonathan Chan"
+date: "2025-03-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+```
+
+# Gene Ontology/Pathway Analysis
+
+## ClusterProfiler
+I also use FEA via ClusterProfiler from Bioconductor package.
+
+```{r fea_clusterprofiler}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+background_uniprot <- read_tsv('../DATA/UKB/RAP/olink_allpanel_uniprot.tsv',col_names=F) %>% unique() #For allpanels
+
+model_name <- 'xgboost_nofs'
+
+#Retrieve SHAP values
+shap_values <- read_csv(str_c('../OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap/',model_name,'/',model_name,'_mean_abs_shap_values.csv')) %>%
+  mutate(Feature = str_to_upper(Feature)) %>%
+  mutate(Feature=ifelse(Feature=='NTPROBNP', 'NTproBNP', Feature))
+
+#Add the UniProt IDs from Sun 2023's supp. info
+sun2023_ref <- read_excel('../DATA/UKB/RAP/Sun2023_UKBPP_PPs.xlsx')
+```
+### Gene Ontology Analysis
+This runs both ORA for the differentially expressed proteins and GSEA for the entire list of proteins evaluated.
+
+```{r}
+enrich_plotter<- function(input_enrichobj, output_path, output_name){
+  
+  print(head(attr(input_enrichobj, 'result'), 20)) #This accesses the head of the result attribute of the enrichResult object
+  
+  if(nrow(input_enrichobj) > 0){
+      dt <- dotplot(input_enrichobj, showCategory=20, orderBy='p.adjust', decreasing=F ) + xlim(c(0,1))
+      print(dt)
+    #emap <- emapplot(input_enrichobj)
+    
+    ggsave(dt, filename=str_c(output_path, output_name, '_dot.png'), dpi=600, width=6, height=9)
+    #gsave(emap, filename=str_c(output_path, output_name, '_emap.png'), dpi=600)
+  } else{
+    print(str_c('No significant enrichments for', output_name, 'after FDR 5% adjustment', sep=' ' ))
+  }
+
+}
+
+gene_ontology_function <- function(shap_values, uniprot_ref_tb, background_uniprot,model_name,output_folder='../OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap/', n_top=30,ontologies=c('BP','MF','CC')){
+  
+  print(str_c('Running GO ORA analysis for top ', n_top, ' plasma proteins'))
+  
+  top_shap_pp <- shap_values %>%
+    slice_max(order_by = mean_abs_shap_value, n = n_top)
+  n1 <- nrow(top_shap_pp)
+  
+  top_shap_pp <- left_join(top_shap_pp, dplyr::select(sun2023_ref, `Assay Target`, `UniProt`), by=c('Feature'='Assay Target'))
+  n2 <- nrow(top_shap_pp)
+  
+  if(n1 != n2){
+    print('UniProt ID matching error')
+    stop()
+  } 
+  
+  #Run ORA - overrepresentation analysis
+
+  #Run Ontology analysis
+  ora_results <- map(ontologies, ~enrichGO(top_shap_pp$UniProt, 'org.Hs.eg.db',keyType = 'UNIPROT', ont=., universe=background_uniprot$X1, readable=T))
+  names(ora_results) <- ontologies
+  
+  #Run KEGG analysis
+  ora_results[['KEGG']] <- enrichKEGG(top_shap_pp$UniProt, 'hsa',keyType = 'uniprot', universe=background_uniprot$X1)
+  saveRDS(ora_results, str_c(output_folder, model_name,'_ontology_results_top',n_top,'.rds'))
+  
+  path <- str_c(output_folder, model_name)
+  walk2(ora_results, c(ontologies, 'KEGG'), ~enrich_plotter(.x, path, .y))
+}
+
+gene_ontology_function(shap_values, sun2023_ref, background_uniprot, model_name) #Run for top 30 plasma proteins
+
+ntops <- c(15,60,120)
+walk(ntops, ~gene_ontology_function(shap_values, sun2023_ref, background_uniprot, model_name, n_top=.)) 
+
+```
+
+```
