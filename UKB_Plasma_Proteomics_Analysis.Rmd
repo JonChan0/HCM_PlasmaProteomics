@@ -103,9 +103,9 @@ This R Markdown describes the analysis of the UK Biobank plasma proteomics data 
 ## 5Y = Only considering i0 cases OR cases diagnosed within 5 years of attendance OR died within 5 years of attendance and had death cause record mentioning disease
 ## Total = Considering ALL cases recorded in the UKB regardless of date of diagnosis
 
-instance <- '3_TOTAL'
+# instance <- '3_TOTAL'
 # instance <- '1_I0'
-# instance <- '2_5Y'
+instance <- '2_5Y'
 
 # instance <- '4_NEGTOTAL' #Those who are never HCM or HF patients
 
