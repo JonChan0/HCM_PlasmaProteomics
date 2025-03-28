@@ -96,7 +96,7 @@ def get_model_and_params(model_type):
 def train_model(X_train, y_train, model, param_grid, model_name, model_output_folder, X_train_data_path, feature_selection='False', features_to_bypass_fs=[], features_to_select_fs=[]):
     start_time = time.time()
 
-    # Determine feature names for quantitative (numeric) features only
+    # Determine feature names for quantitative (numeric) features only in the original X_train prior to filtering for those in features_to_bypass_fs and features_to_select_fs
     quantitative_feature_names = X_train.select_dtypes(include=['int64', 'float64']).columns.tolist()
 
     # Determine feature names for categorical features only
@@ -112,6 +112,12 @@ def train_model(X_train, y_train, model, param_grid, model_name, model_output_fo
     features_to_select_names = [col for col in quantitative_feature_names if col in features_to_select_fs]
     features_to_bypass_names = [col for col in quantitative_feature_names if col in features_to_bypass_fs]
 
+    ##############################################################################
+    #From the X_train, only select the features that are in the features_to_bypass_fs and features_to_select_fs lists as well as in the categorical and boolean features
+    X_train = X_train[features_to_bypass_names +  categorical_feature_names + boolean_feature_names + features_to_select_names ]
+    print(X_train.columns)
+
+    quantitative_feature_names = X_train.select_dtypes(include=['int64', 'float64']).columns.tolist() #Redefine the quantitative feature names to ensure that the correct ones are passed to KNN impute
     ###########################################################################################################
       # Check if model type is random forest or xgboost
     if model_name in ['random_forest', 'xgboost'] and feature_selection == 'True':
@@ -300,6 +306,7 @@ if __name__ == "__main__":
     parser.add_argument('--target_variable', type=str, default='', help="The target variable is either prevalent (i.e HCM case/control status) or incident (i.e incident HCM diagnosis)")
     parser.add_argument('--X_train_data', type=str, default='', help="The model data containing training data for X")
     parser.add_argument('--y_train_data', type=str, default='', help="The model data containing training data for y")
+    parser.add_argument('--filesuffix', type=str, default='', help="Suffix to append to the model name")
     args = parser.parse_args()
 
     if args.target_variable in ['allcases','prevalent']: # Initialize wandb with a project name based on the model type
@@ -341,6 +348,7 @@ if __name__ == "__main__":
     #Load the features to bypass and the features to select
     if args.features_to_bypass_fs:
         features_to_bypass_fs = pd.read_csv(args.features_to_bypass_fs, header=None).iloc[:, 0].tolist()
+        print('Quantitative features to bypass feature selection')
         print(features_to_bypass_fs)
         wandb.config.update({"features_to_bypass_fs": features_to_bypass_fs})
     else:
@@ -348,6 +356,7 @@ if __name__ == "__main__":
 
     if args.features_to_select_fs:
         features_to_select_fs = pd.read_csv(args.features_to_select_fs).loc[:, 'name'].tolist()
+        print('Quantitative features of interest')
         print(features_to_select_fs)
         wandb.config.update({"features_to_select_fs": features_to_select_fs})
     else:
@@ -362,6 +371,8 @@ if __name__ == "__main__":
     #If feature_selection is False, append '_nofs' to the model name
     if args.feature_selection == 'False':
         args.model_name = args.model_name + '_nofs'
+    if args.filesuffix: #If there is a filesuffix, also add that the model name
+        args.model_name = args.model_name + '_' + args.filesuffix
 
     # Train the model
     trained_model = train_model(X_train, y_train, model, param_grid, args.model_name, args.model_output_folder, args.X_train_data, args.feature_selection, features_to_bypass_fs, features_to_select_fs)
