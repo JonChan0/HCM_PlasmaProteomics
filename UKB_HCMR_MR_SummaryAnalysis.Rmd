@@ -1,0 +1,153 @@
+---
+title: "UKB_HCMR_MR_SummaryAnalysis"
+author: "Jonathan Chan"
+date: "2025-03-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggrepel)
+theme_set(theme_classic())
+```
+
+This provides summary plot of the results from bidirectional MR from HCM <-> plasma protein.
+The plasma proteins passed in are those which pass MTC threshold in UKB either case-control association analysis OR incident diagnosis analysis.
+
+```{r config}
+ukb_mr_folder <- '../../EDA_HCMR/popgen/5_MR/output/ukb_noHarper_inclHCM/'
+hcmr_mr_folder <- '../../EDA_HCMR/popgen/5_MR/output/hcmr/'
+results_folder <- 'OUTPUT/UKB/PLOTS/6_MR_Summary/'
+```
+
+
+```{r pp_of_choice}
+ukb_pps <- c(
+  'NTproBNP','NPPB','TNNI3','HRC','ANGPT2','LTBP2','STC2','ACE2','F7','SHISA5'
+)
+hcmr_pps <- c('NTproBNP','TnTStat')
+
+```
+
+```{r import}
+ukb_analyses <- list.dirs(ukb_mr_folder, recursive=F, full.names=F)
+ukb_analyses <- ukb_analyses[str_detect(ukb_analyses, str_c(ukb_pps, collapse='|'))]
+
+hcmr_analyses <- list.dirs(hcmr_mr_folder, recursive=F, full.names=F)
+hcmr_analyses <- hcmr_analyses[str_detect(hcmr_analyses, str_c(hcmr_pps, collapse='|'))]
+
+mainline_results_importer <- function(folder){
+  mainline_results <- read.table(str_c(folder, '/',str_match(folder,'\\/([^\\/]+)_to_')[,2], '_mr_results_mainline.tsv')) %>%
+    select(-id.exposure, -id.outcome) %>%
+    mutate(exposure=ifelse(exposure=='TnTStat', 'TNNT2', exposure),
+           outcome=ifelse(outcome=='TnTStat','TNNT2',outcome)) %>%
+    mutate(exposure = ifelse(exposure == 'hcm', 'HCM', exposure),
+           outcome= ifelse(outcome=='hcm','HCM', outcome)) %>%
+    mutate(exposure_outcome = str_c(exposure, outcome, sep=' -> '))
+  
+  return(mainline_results)
+}
+
+ukb_results <- map(str_c(ukb_mr_folder, ukb_analyses), ~mainline_results_importer(.)) %>% bind_rows() %>% mutate(dataset='UKB')
+hcmr_results <- map(str_c(hcmr_mr_folder, hcmr_analyses), ~mainline_results_importer(.)) %>% bind_rows() %>% mutate(dataset='HCMR')
+mr_results <- bind_rows(ukb_results, hcmr_results)
+
+write_tsv(mr_results, str_c(results_folder, 'summary_MR_results.tsv'))
+rm(ukb_results, hcmr_results)
+
+```
+
+
+```{r}
+sensitivity_or_results_importer <- function(folder){
+  mainline_results <- read.table(str_c(folder, '/',str_match(folder,'\\/([^\\/]+)_to_')[,2], '_mr_results_sensitivity_oddsratio.tsv'))
+  
+  if('V1' %in% colnames(mainline_results)){
+    print(str_c('No confidence interval estimates due to single-SNP MR for', folder))
+    return()
+  } else{
+    mainline_results <- mainline_results %>% select(-id.exposure, -id.outcome)%>%
+    mutate(exposure=ifelse(exposure=='TnTStat', 'TNNT2', exposure),
+           outcome=ifelse(outcome=='TnTStat','TNNT2',outcome)) %>%
+    mutate(exposure = ifelse(exposure == 'hcm', 'HCM', exposure),
+           outcome= ifelse(outcome=='hcm','HCM', outcome)) %>%
+    mutate(exposure_outcome = str_c(exposure, outcome, sep=' -> '))
+    
+      return(mainline_results)
+  }
+}
+
+ukb_results_or <- map(str_c(ukb_mr_folder, ukb_analyses), ~sensitivity_or_results_importer(.)) %>% bind_rows() %>% mutate(dataset='UKB')
+hcmr_results_or <- map(str_c(hcmr_mr_folder, hcmr_analyses), ~sensitivity_or_results_importer(.)) %>% bind_rows() %>% mutate(dataset='HCMR') 
+
+mr_results_or <- bind_rows(ukb_results_or, hcmr_results_or) %>% filter(method %in% c('Inverse variance weighted', 'Wald ratio')) 
+
+#Add back the mr_results for the Wald ratio based rows (which don't have odds ratios)
+mr_results_or <- bind_rows(mr_results_or, filter(mr_results, method=='Wald ratio'))
+
+mr_results_or <- mr_results_or
+
+write_tsv(mr_results_or, str_c(results_folder, 'summary_MR_results_oddsratio.tsv'))
+rm(hcmr_results_or, ukb_results_or)
+```
+
+Correct for multiple testing 
+
+```{r}
+mr_results_or <- mr_results_or %>%
+  mutate(mtc_pval = p.adjust(pval, method='fdr')) %>%
+  mutate(label = ifelse(mtc_pval <= 0.05, exposure_outcome, '')) %>%
+  mutate(group = ifelse(exposure=='HCM', 'HCM -> X', 'X -> HCM'))
+```
+
+## Summary Plot
+
+```{r}
+#Output the summary scatter plot of pvalue with effect size
+summary_scatter_confint <- ggplot(mr_results_or,aes(x=b,y=-log10(mtc_pval))) +
+  geom_point(aes(shape=group, col=dataset))+
+  geom_errorbar(aes(xmin=lo_ci, xmax=up_ci, col=dataset))+
+  geom_vline(xintercept=0, linetype='dashed', col='black')+
+  geom_hline(yintercept=-log10(0.05), linetype='dashed', col='black')+
+  geom_text_repel(aes(label=label, col=dataset))+
+  xlab('Beta (Increase in Outcome per Log(Odds) or SD Increase in Exposure)')+
+  ylab('-log10 (Adjusted p-value)')+
+  labs(shape='Direction', col='Dataset')+
+  labs(title=str_wrap(str_c('Summary plot of 2-sample Mendelian Randomisation for ', nrow(mr_results_or), ' analyses'))
+       ,caption='Error bars = 95% confidence interval'
+       )
+
+print(summary_scatter_confint)
+ggsave(str_c(results_folder, 'MR_summary_plot_confint.png'),summary_scatter_confint, dpi=600, width=9, height=6)
+```
+## Forest Plot for Significant Conclusions
+
+```{r}
+sig_mr_results_or <- mr_results_or %>%
+  filter(label !='')
+
+#Create a faceted plot where I have the top plot = per-unit OR and the bottom plot = per-SD OR
+
+sig_mr_results_or <- sig_mr_results_or %>%
+    mutate(exposure_plot_group = case_when(
+                                         exposure == 'HCM' ~ 'Per-Log(Odds) Exposure',
+                                         T~'Per-Unit Exposure'))
+
+
+sig_mr_results_or <- sig_mr_results_or %>%
+  mutate(outcome_plot_group = ifelse(outcome %in% c('HCM'), 'OR', 'beta')) %>%
+  mutate(exposure_outcome=factor(exposure_outcome))
+
+forest_plot1 <- ggplot(sig_mr_results_or)+
+  geom_point(aes(x=b, y= exposure_outcome, col=dataset))+
+  geom_errorbar(aes(xmin=lo_ci, xmax=up_ci, y=exposure_outcome,col=dataset))+
+  geom_vline(xintercept=0, col='black', linetype='dashed')+
+  xlab('Change in Continuous Outcome (SD) per Log-Odds (HCM) Exposure')+
+  ylab('Exposure -> Outcome')+
+  labs(col='Dataset')
+
+print(forest_plot1)
+ggsave(str_c(results_folder,'sig_MR_forestplot.png'),forest_plot1, dpi=600, width=9, height=4.5)
+```
+
