@@ -139,7 +139,7 @@ plot_model_comparison <- function(cv_results_list, model_names = NULL,
                                   metrics = c('roc_auc','balanced_accuracy','f1','average_precision'),
                                   output_folder = DEFAULT_OUTPUT_FOLDER,
                                   filename = "model_comparison.png",
-                                  width = 10, height = 7, dpi = 600, save = TRUE) {
+                                  width = 10, height = 7, dpi = 600, save = TRUE, xlimits=c(0,1), filter_models='') {
   
   if (is.null(model_names)) {
     model_names <- paste0("Model", 1:length(cv_results_list))
@@ -153,6 +153,10 @@ plot_model_comparison <- function(cv_results_list, model_names = NULL,
   # Extract best models for each CV result with standard deviations
   best_models <- extract_best_models(cv_results_list, model_names, metrics_full[1])
   
+  if (filter_models != ''){
+    best_models <- best_models %>% filter(str_detect(model_type, filter_models))
+  }
+  
   # Filter for requested metrics and plot with error bars
   p <- best_models %>%
     filter(metric %in% metrics) %>%
@@ -161,7 +165,7 @@ plot_model_comparison <- function(cv_results_list, model_names = NULL,
     geom_errorbar(aes(xmin = value - std, xmax = value + std),
                   position = position_dodge(width = 0.5),
                   width = 0.2) +
-    scale_x_continuous(limits = c(0, 1)) +
+    scale_x_continuous(limits =xlimits) +
     labs(title = "Validation Performance Comparison",
          caption = "Points show mean values, error bars show standard deviation",
          y = "Model Type", 
@@ -193,7 +197,13 @@ main <- function(input_folder){
   
   #Output the cross-model comparison plots
   plot_model_comparison(cv, names(cv), output_folder='../OUTPUT/UKB/ML/3_summary_plots/cv_performance/crossmodel_comparison/',
-                        metrics=c('roc_auc'))
+                        metrics=c('roc_auc'), xlimits=c(0.5,1))
+  
+  #Only perform cross-model comparison for a certain class of models
+  model_class_of_interest <- 'xgboost'
+  plot_model_comparison(cv, names(cv), output_folder=str_c('../OUTPUT/UKB/ML/3_summary_plots/cv_performance/crossmodel_comparison/',model_class_of_interest),
+                        metrics=c('roc_auc'), filter_models=model_class_of_interest, xlimits=c(0.5,1),width = 9, height = 3)
+  
   
 }
 
