@@ -12,7 +12,9 @@ conda activate python3.11_ml
 # Set the number of threads for Python
 export OMP_NUM_THREADS=2
 
-model_name=xgboost_nofs #Definet the model name here e.g logistic_regression, xgboost, svm, l1_logistic_regression_nofs
+#Define the model name here e.g logistic_regression, xgboost, svm, l1_logistic_regression_nofs
+# model_name=xgboost_nofs 
+model_name=xgboost_nofs_cov_ccFDR9only
 echo Performing test set evaluation $model_name
 
 python 4_Polyproteomic_TestSet_Evaluator.py \
