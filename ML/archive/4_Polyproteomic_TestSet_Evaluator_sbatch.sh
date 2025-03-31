@@ -23,5 +23,5 @@ python 4_Polyproteomic_TestSet_Evaluator.py \
     --X_test_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_test.csv \
     --y_test_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/y_test.csv \
     --plot_output_path ../OUTPUT/UKB/ML/3_summary_plots/test_set_inference/1_hcm_cc_noprs/ \
-    --n_boostraps 1000 \
+    --n_bootstraps 1000 \
     --random_seed 42
