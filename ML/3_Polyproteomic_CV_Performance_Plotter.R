@@ -175,11 +175,35 @@ plot_model_comparison <- function(cv_results_list, model_names = NULL,
     theme(#axis.text.x = element_text(angle = 45, hjust = 1),
           legend.position = "top")
   
+  # Filter for requested metrics and plot with error bars
+  p2 <- best_models %>%
+    filter(metric %in% metrics) %>%
+    ggplot(aes(y = model_type, x = value, color = metric)) +
+    geom_point(position = position_dodge(width = 0.5), size = 3) +
+    geom_errorbar(aes(xmin = value - std, xmax = value + std),
+                  position = position_dodge(width = 0.5),
+                  width = 0.2) +
+    geom_text(aes(label = sprintf("%.2f ± %.2f", value, std)), 
+              position = position_dodge(width = 0.5), 
+              vjust = -0.5, 
+              size = 3.5) + 
+    scale_x_continuous(limits = xlimits) +
+    labs(title = "Validation Performance Comparison (With Mean & SD)",
+         caption = "Points show mean values, error bars show standard deviation",
+         y = "Model Type", 
+         x = "Score",
+         color = "Metric") +
+    theme_classic() +
+    theme(legend.position = "top")
+  
   # Save the plot if requested
   if (save) {
     ensure_output_dir(output_folder)
     output_path <- file.path(output_folder, filename)
     ggsave(output_path, plot = p, width = width, height = height, dpi = dpi)
+    message(sprintf("Plot saved to: %s", output_path))
+    output_path <- str_c(output_folder, '/model_comparison_labelled.png')
+    ggsave(output_path, plot = p2, width = width, height = height, dpi = dpi)
     message(sprintf("Plot saved to: %s", output_path))
   }
   
