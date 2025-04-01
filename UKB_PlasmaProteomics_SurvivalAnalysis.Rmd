@@ -328,7 +328,7 @@ if(isTRUE(rcmm_cov)){
   covariates <- c('sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','smoking','t2d')
 }
 
-pp <- c('ntprobnp','hrc') 
+pp <- c('ntprobnp','hrc', 'ace2') 
 statuses <- c('vacomp_status','hfcomp_status','overallcomp_status')
 surv_ages <- c('vacomp_age','hfcomp_age','overallcomp_age')
 
@@ -508,7 +508,7 @@ Now plot a summary plot of the results for each predictor.
 
 ```{r multivariate_cox_plotter, fig.width=9, fig.height=6, message=F,warning=F}
 
-multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, selected_vars = c('ntprobnp','hrc'),FDR=5, xlim=c(0,8), ylim=c(0,7), pp_scaling =F){
+multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, selected_vars = c('ntprobnp','hrc','ace2'),FDR=5, xlim=c(0,8), ylim=c(0,7), pp_scaling =F){
   
   if (!is.numeric(FDR)){ #Apply Bonferroni
     pval_threshold = 0.05/nrow(multivariate_results)
@@ -556,12 +556,12 @@ if(isTRUE(rcmm_cov)){
 }
 
 multivariate_cox_results <- multivariate_cox_results %>%
-  mutate(predictor = factor(predictor, levels=c('NTPROBNP','HRC')))
+  mutate(predictor = factor(predictor, levels=c('NTPROBNP','HRC', 'ACE2')))
 
 multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_alloutcomes_fdr5', selected_vars=c('ntprobnp'), pp_scaling = pp_scaling)
 multivariate_coxph_plotter(multivariate_cox_results,path, 'hrc_alloutcomes_fdr5', selected_vars=c('hrc'), pp_scaling = pp_scaling)
-multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_hrc_alloutcomes_fdr5', pp_scaling = pp_scaling)
-multivariate_coxph_plotter(multivariate_cox_results, path, 'ntprobnp_hrc_alloutcomes_bonferroni', FDR=F, ylim=c(0,8), pp_scaling = pp_scaling)
+multivariate_coxph_plotter(multivariate_cox_results,path, 'allpp_alloutcomes_fdr5', pp_scaling = pp_scaling)
+multivariate_coxph_plotter(multivariate_cox_results, path, 'allpp_alloutcomes_bonferroni', FDR=F, ylim=c(0,8), pp_scaling = pp_scaling)
 
 ```
 ### Cox Assumptions
