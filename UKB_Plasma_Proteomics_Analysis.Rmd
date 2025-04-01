@@ -1151,7 +1151,7 @@ ukb_diag_cox_tb <- ukb_diag_cox_tb %>%
   mutate(incidenthcm_age = (ifelse(incidenthcm_status==T, time_length(min_diag_date2-dob_approx, unit='year'), min(datasetversion_age, death_age, lost_age, na.rm=T)))) %>% #Add in incident_hcm_age = if status, that will be min_diag_date2 and if not, then it will be the age at dataset version or lost to followup
   ungroup()
 
-write_tsv(ukb_diag_cox_tb, str_c('DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_HCMdiagCox_pp', pp_scaling, '.tsv'))
+#write_tsv(ukb_diag_cox_tb, str_c('DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_HCMdiagCox_pp', pp_scaling, '.tsv'))
 ```
 
 ## Multivariate Cox
