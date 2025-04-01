@@ -98,6 +98,11 @@ This R Markdown describes the analysis of the UK Biobank plasma proteomics data 
 
 ```{r import_ukb_data}
 
+#N.B Time instancing only applies to HCM cases. HF and T2D are assumed to have no time lag so i0 cases are used for those.
+
+hf_eid <- read_csv('DATA/UKB/PROCESSED/1_I0/ukb_rap_HF_20240209_i0cases.tsv')
+t2d_cases <- read_tsv('DATA/UKB/PROCESSED/1_I0/ukb_rap_T2D_20240209_i0cases.tsv')
+
 #Define the instance here - either
 ## i0 = Only considering cases diagnosed prior to date of attendance at instance 0 
 ## 5Y = Only considering i0 cases OR cases diagnosed within 5 years of attendance OR died within 5 years of attendance and had death cause record mentioning disease
@@ -113,29 +118,15 @@ if(instance =='1_I0'){
   #HCM Cases - UKB prior to Instance 0
   ukb_cases <- read_csv('DATA/UKB/PROCESSED/1_I0/ukb_rap_HCM_20240209_i0cases.tsv')
   #HF Cases - UKB prior to Instance 0
-  hf_eid <- read_csv('DATA/UKB/PROCESSED/1_I0/ukb_rap_HF_20240209_i0cases.tsv')
-  #T2D cases -UKB prior to instance 0
-  t2d_cases <- read_tsv('DATA/UKB/PROCESSED/1_I0/ukb_rap_T2D_20240209_i0cases.tsv')
   
 } else if (instance=='2_5Y'){
   #HCM Cases - UKB 5Y
   ukb_cases <- read_csv('DATA/UKB/PROCESSED/2_5Y/ukb_rap_HCM_20240209_5Ycases.tsv')
-  #HF Cases - UKB 5Y
-  hf_eid <- read_csv('DATA/UKB/PROCESSED/2_5Y/ukb_rap_HF_20240209_5Ycases.tsv')
-  #T2D cases -UKB 5Y
-  t2d_cases <- read_tsv('DATA/UKB/PROCESSED/2_5Y/ukb_rap_T2D_20240209_5Ycases.tsv')
+
 } else if (instance %in% c('3_TOTAL','4_NEGTOTAL')){
   #HCM Cases - All UKB
   ukb_cases <- read_csv('DATA/UKB/RAP/Cases/ukb_rap_HCM_20240209.csv') %>%
   dplyr::rename(ID=1)
-  
-  #HF Cases - All UKB
-  hf_eid <- read_csv('DATA/UKB/RAP/Cases/ukb_rap_HF_20240209.csv')
-  colnames(hf_eid) <- 'ID'
-
-  #T2D cases - All UKB
-  t2d_cases <- read_tsv('DATA/UKB/RAP/Cases/ukb_rap_T2D_20240209.csv')
-  colnames(t2d_cases) <- 'ID'
 }
 ```
 
@@ -179,11 +170,13 @@ if (isTRUE(include_nonCM_panels)){
     select(eid, instance, olink_cm_panel$ukb_fieldname_equivalent, olink_nonCM_panels$ukb_fieldname_equivalent) 
   
   ukb_pp_list <- bind_rows(olink_cm_panel, olink_nonCM_panels)#Some pp shared across multiple panels btw
+  write_tsv(ukb_pp_list, 'DATA/UKB/PROCESSED/ukb_pp_list_allpanel.tsv')
 } else{
   ukb_pp_data<- ukb_proteomics_data %>%
     select(eid, instance, olink_cm_panel$ukb_fieldname_equivalent)
   
   ukb_pp_list <- olink_cm_panel
+  write_tsv(ukb_pp_list, 'DATA/UKB/PROCESSED/ukb_pp_list_cmpanel.tsv')
 }
 rm(ukb_proteomics_data)
 ```
@@ -261,10 +254,12 @@ ukb_20240209_snptest_covariates <- ukb_20240209_snptest_covariates %>%
 rm(ukb_20240209_bp_i0)
 
 
-#Add T2D status (depending on the instance 0 or 5Y or Total)
+#Add T2D status (using i0 cases)
 ukb_20240209_snptest_covariates <- ukb_20240209_snptest_covariates %>%
   mutate(t2d = ifelse(ID %in% t2d_cases[[1]], T, F))
 rm(t2d_cases)
+
+write_tsv(ukb_20240209_snptest_covariates, 'DATA/UKB/PROCESSED/20240209_ukb_age_sex_htwt_10pcs_dbp_t2d_smoking_cov.tsv')
 ```
 Add in further covariates recommended by Rob Clarke and Mohsen e.g eGFR (glomerular filtration rate); socioeconomic Townsend deprivation index; and HDL/LDL cholesterol levels.
 
@@ -285,6 +280,8 @@ if(isTRUE(rcmm_cov)){
                             142*min(creatinine_i0/0.9,1)^-0.302 * max(creatinine_i0/0.9,1)^-1.2 * 0.9938^age * 1
     )) %>% 
     select(ID, Townsend, eGFR,hdl= hdl_i0, ldl=ldl_i0)
+  
+  write_tsv(ukb_20240209_rcmm_cov, 'DATA/UKB/PROCESSED/20240209_ukb_rcmm_cov.tsv')
 }
 ```
 
@@ -315,9 +312,9 @@ ukb_pp_hcm_cov2 <- ukb_pp_data %>%
 
   #Write out the pp + covariates + HCM label depending on the time instancing
   if(isTRUE(include_nonCM_panels)){
-      write_tsv(ukb_pp_hcm_cov2, str_c('data/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking.tsv'))
+      write_tsv(ukb_pp_hcm_cov2, str_c('DATA/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking.tsv'))
   } else{
-      write_tsv(ukb_pp_hcm_cov2, str_c('data/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking.tsv'))
+      write_tsv(ukb_pp_hcm_cov2, str_c('DATA/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking.tsv'))
   }
 
 if (isTRUE(rcmm_cov)){
@@ -329,16 +326,28 @@ if (isTRUE(rcmm_cov)){
   filter(if_all(c(Townsend,eGFR,ldl), ~!is.na(.)))#Filter out individuals who have NA value for covariates = 49576 individuals
 
   if(isTRUE(include_nonCM_panels)){
-    write_tsv(ukb_pp_hcm_cov2, str_c('data/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+    write_tsv(ukb_pp_hcm_cov2, str_c('DATA/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
   } else{
-    write_tsv(ukb_pp_hcm_cov2, str_c('data/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+    write_tsv(ukb_pp_hcm_cov2, str_c('DATA/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
   }
 } 
 
 sum(ukb_pp_hcm_cov2$hcm)
-sum(ukb_pp_hcm_cov2$t2d)
 ```
 
+Reimport data here
+
+```{r}
+
+if(isTRUE(include_nonCM_panels)){
+    ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+    
+    ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_allpanel.tsv')
+  } else{
+    ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+    ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_cmpanel.tsv')
+  }
+```
 
 # QC of Time-Instancing
 
@@ -647,14 +656,18 @@ The second plot after normalisation shows that rank-based inverse normalisation 
 # }
 ```
 
+Define the plasma proteins of interest.
+
+```{r}
+pp <- ukb_pp_list$ukb_fieldname_equivalent[ukb_pp_list$ukb_fieldname_equivalent %in% colnames(ukb_pp_hcm_cov2)] %>%  #In case any PP are removed due to lack of non-NA values
+  unique()
+```
+
 ## Multivariate Regression
 
 This performs the comparison but with adjustment for confounders (age; sex; BMI; common genetic PCs to reflect ancestry/population structure).
 
 ```{r}
-pp <- ukb_pp_list$ukb_fieldname_equivalent[ukb_pp_list$ukb_fieldname_equivalent %in% colnames(ukb_pp_hcm_cov2)] %>%  #In case any PP are removed due to lack of non-NA values
-  unique()
-
 #By default, it performs rank-based inverse normalisation of the response variable
 # pp_vs_hcm_marginal <- map(pp, ~multivariate_assessor(ukb_pp_hcm_cov,.,'hcm',covars=c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5'),cont_or_discrete_response='cont', model_return=F, summary_print=F, ivnormalise = T)) %>% bind_rows() %>%
 #   mutate(Label=olink_cm_panel$Gene, Label2=olink_cm_panel$Gene)
@@ -707,14 +720,14 @@ limma_dpe <- function(input_tb, protein, predictor_vars='hcm', covar=c('age','se
   }
   
   #Separate into pheno_df for covariates and predictors and npx_df containing the NPX value for the protein over all individuals
-  pheno_df <- select(input_tb, all_of(predictor_vars),all_of(covars)) %>%
+  pheno_df <- select(input_tb, all_of(predictor_vars),all_of(covar)) %>%
     mutate(across(all_of(predictor_vars), ~factor(.)))
   npx_df <- select(input_tb, !!sym(protein))
   
   #Need to define the formula i.e model and the model matrix
   formula <- str_c('~0 +',
                    str_c(predictor_vars,collapse='+'),
-                   '+',str_c(covars, collapse='+'))
+                   '+',str_c(covar, collapse='+'))
   design <- model.matrix(eval(parse(text=formula)), pheno_df)
   
   #Need to create the matrix array for limma i.e rows = proteins; columns = samples via t() for transpose
@@ -751,7 +764,7 @@ limma_dpe <- function(input_tb, protein, predictor_vars='hcm', covar=c('age','se
 Visualise the results in a volcano plot
 
 ```{r}
-summary_plotter_limma <- function(input_tb, output_label='ukb_cmpanel', predictor = 'HCM status', output_path=str_c('PLOTS/UKB/1_Case_vs_Control/2_Limma/',instance), pval='bonferroni', fdr_threshold = 0.05, test='Empirical Bayes moderated t-test',xlabel='Log2(Fold-Change)', xlimits=c(-1,1.75), specific_label=F){
+summary_plotter_limma <- function(input_tb, output_label='ukb_allpanel', predictor = 'HCM status', output_path=str_c('PLOTS/UKB/1_Case_vs_Control/2_Limma/',instance), pval='bonferroni', fdr_threshold = 0.05, test='Empirical Bayes moderated t-test',xlabel='Log2(Fold-Change)', xlimits=c(-1,2),ylimits=c(0,40), specific_label=F, max_repel_overlaps=100){
   
   if (pval=='fdr'){
     input_tb <- input_tb %>%
@@ -780,9 +793,12 @@ summary_plotter_limma <- function(input_tb, output_label='ukb_cmpanel', predicto
     geom_vline(xintercept=0, linetype='dashed')+
     geom_point()+
     scale_colour_manual(name=ifelse(isFALSE(specific_label),'MTC Significant','PP of Interest'),values=c('FALSE'='grey','TRUE'='red'))+
-    geom_text_repel(aes(label=Label), nudge_y=15, max.overlaps=100)+
+    geom_text_repel(aes(label=Label), nudge_y=3 ,
+                    #nudge_x=0.5,
+                    force =5, max.overlaps=max_repel_overlaps)+
     labs(col='Phenotype',shape='Predictor')+
     scale_x_continuous(n.breaks=10, limits=xlimits)+
+    scale_y_continuous(limits=ylimits)+
     xlab(xlabel)+
     ylab('-log10(p-value)')+
     labs(title=str_c('Summary plot of ', test,' tests for ',length(unique(input_tb$pp)), ' plasma proteins for ', predictor, ' predictor variable'))
@@ -799,7 +815,7 @@ summary_plotter_limma <- function(input_tb, output_label='ukb_cmpanel', predicto
     summary_cont_plot <- summary_cont_plot +
       geom_hline(yintercept=-log10(pval_threshold), linetype='dashed')+
       ylab('-log10(Adjusted p-value)')+
-      labs(caption='FDR correction applied for multiple testing burden')
+      labs(caption=str_c( fdr_threshold*100, '% FDR correction applied for multiple testing burden'))
   } else if (is.numeric(pval)){
     summary_cont_plot <- summary_cont_plot +
       geom_hline(yintercept=-log10(pval_threshold), linetype='dashed')+
@@ -807,7 +823,7 @@ summary_plotter_limma <- function(input_tb, output_label='ukb_cmpanel', predicto
   }
   
   print(summary_cont_plot)
-  ggsave(str_c(output_path,output_label,'_summary_plot_',pval,'.png'),summary_cont_plot,dpi=600, width=12, height=6)
+  ggsave(str_c(output_path,output_label,'_summary_plot_',pval,'.png'),summary_cont_plot,dpi=600, width=9, height=6)
   
   #Also output a MAplot 
   ma_plot <- ggplot(input_tb, aes(x = log10(abs(AveExpr)), y = logFC)) +
@@ -815,7 +831,7 @@ summary_plotter_limma <- function(input_tb, output_label='ukb_cmpanel', predicto
     geom_text_repel(aes(label=Label))+
     labs(x = "Log10(Mean Normalised NPX)", y = xlabel) +
     scale_colour_manual(name='MTC Significant',values=c('FALSE'='grey','TRUE'='red'))+
-    labs(title=str_c('MA plot for ', test, ' in UKB plasma proteins CM panel'))
+    labs(title=str_c('MA plot for ', test, ' in UKB plasma proteins'))
 
   print(ma_plot)
   ggsave(str_c(output_path,output_label,'_ma_plot_',pval,'.png'),ma_plot,dpi=600, width=9, height=6)
@@ -857,7 +873,7 @@ if (isTRUE(rcmm_cov)){ #If using the extended covariate list suggested by Rob Cl
 
 #Reduce the search space only to plasma proteins which have non-NA values in at least 1 HCM case e.g exlcude glipr1 and others
 tic()
-#Running by default with age/sex/genetic PCs/dbp/T2D/smoking status covariates but comparing 103 HCM cases to non-HF/HCM controls
+#Running by default with age/sex/genetic PCs/dbp/T2D/smoking status covariates but comparing HCM cases to non-HF/HCM controls
 limma_hcm_2<- map(pp, ~limma_dpe(ukb_pp_hcm_cov,., covar=covars)) %>% bind_rows()
 toc()
 
@@ -867,16 +883,17 @@ if (isTRUE(rcmm_cov)){
 if(isTRUE(include_nonCM_panels)){
   extra_folders <- str_c(extra_folders, 'allpanels/')
 } 
-path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_V2/', extra_folders) #Define the folder for output of plots and tabular data
+path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM/', extra_folders) #Define the folder for output of plots and tabular data
+if(!dir.exists(path)){dir.create(path, recursive=T)}
 
-write_tsv(limma_hcm_2, str_c(path,'limma_results.tsv'))
-limma_hcm_2 <- left_join(limma_hcm_2, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent')) %>% unique()
+limma_hcm <- left_join(limma_hcm, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent')) %>% unique()
+write_tsv(limma_hcm, str_c(path,'limma_results.tsv'))
 
-pp_vs_hcm_2_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm_2, 'allpp_vs_hcm_2',predictor = 'HCM status',output_path=path) 
+pp_vs_hcm_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm, 'allpp_vs_hcm',predictor = 'HCM status',output_path=path, xlimits=c(-1,1.75),ylimits=c(0,30)) 
 
 #Also for 5%FDR and 1%FDR
-pp_vs_hcm_2_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm_2, 'allpp_vs_hcm_2',predictor = 'HCM status',output_path=path, pval = 'fdr') 
-pp_vs_hcm_2_marginal_fdr1_summarytb_limma <- summary_plotter_limma(limma_hcm_2, 'allpp_vs_hcm_fdr1',predictor = 'HCM status',output_path=path, pval = 'fdr', fdr_threshold=0.01) 
+pp_vs_hcm_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm, 'allpp_vs_hcm',predictor = 'HCM status',output_path=path, pval = 'fdr', xlimits=c(-1,1.75),ylimits=c(0,30)) 
+pp_vs_hcm_marginal_fdr1_summarytb_limma <- summary_plotter_limma(limma_hcm, 'allpp_vs_hcm_fdr1',predictor = 'HCM status',output_path=path, pval = 'fdr', fdr_threshold=0.01, xlimits=c(-1,1.75),ylimits=c(0,30)) 
 
 rm(ukb_pp_hcm_cov, path)
 ```
@@ -905,19 +922,15 @@ sum(ukb_pp_hcm_cov_exclHF$hcm==F) #Non-HF non-HCM controls
 
 limma_hcm_exclHF <- map(pp, ~limma_dpe(ukb_pp_hcm_cov_exclHF,., covar=covars)) %>% bind_rows()
 
-path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_V2/exclHFcases/', extra_folders) #Define the folder for output of plots and tabular data
-
-write_tsv(limma_hcm_exclHF, str_c(path,'limma_results.tsv'))
+path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM/exclHFcases/', extra_folders) #Define the folder for output of plots and tabular data
+if(!dir.exists(path)){dir.create(path, recursive=T)}
 
 limma_hcm_exclHF <- left_join(limma_hcm_exclHF, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent'))
+write_tsv(limma_hcm_exclHF, str_c(path,'limma_results.tsv'))
 
 #Plot summary plots
-pp_vs_hcm_exclHF_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm_exclHF, 'allpp_vs_hcm_exclHF',predictor = 'HCM status',output_path=path
-                                                                              #,xlimits=c(-1,2)
-                                                                              ) 
-pp_vs_hcm_exclHF_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm_exclHF, 'allpp_vs_hcm_exclHF',predictor = 'HCM status',output_path=path, pval='fdr'
-                                                                        #,xlimits=c(-1,2)
-                                                                        ) 
+pp_vs_hcm_exclHF_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm_exclHF, 'allpp_vs_hcm_exclHF',predictor = 'HCM status',output_path=path,xlimits=c(-1,1.75),ylimits=c(0,30)) 
+pp_vs_hcm_exclHF_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm_exclHF, 'allpp_vs_hcm_exclHF',predictor = 'HCM status',output_path=path, pval='fdr', xlimits=c(-1,1.75),ylimits=c(0,30))
 
 rm(ukb_pp_hcm_cov_exclHF, path)
 ```
@@ -938,7 +951,7 @@ rm(ukb_pp_hcm_cov_exclHF, path)
 # #Rerun Limma
 # limma_hcm_onlyHF <- map(pp, ~limma_dpe(ukb_pp_hcm_cov_onlyHF,.)) %>% bind_rows()
 # 
-# path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_V2/onlyHFcases/') #Define the folder for output of plots and tabular data
+# path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM/onlyHFcases/') #Define the folder for output of plots and tabular data
 # write_tsv(limma_hcm_onlyHF, str_c(path,'cmpanel_limma_results.tsv'))
 # 
 # limma_hcm_onlyHF <- left_join(limma_hcm_onlyHF, select(olink_cm_panel, Gene, `Protein name`, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent'))
@@ -971,16 +984,18 @@ hf_limma_results <- map(pp, ~limma_dpe(ukb_pp_hcm_cov_hf,.,predictor_vars='hf', 
 
 
 path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HF/', extra_folders) #Define the folder for output of plots and tabular data
-write_tsv(hf_limma_results, str_c(path,'cmpanel_limma_results.tsv'))
+if(!dir.exists(path)){dir.create(path, recursive=T)}
+
 hf_limma_results <- left_join(hf_limma_results, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent'))
+write_tsv(hf_limma_results, str_c(path,'limma_results.tsv'))
 
 #Plot total summary plot for HF
-summary_plotter_limma(hf_limma_results, 'allpp_vs_hf',predictor = 'HF status',output_path=path) 
-summary_plotter_limma(hf_limma_results, 'allpp_vs_hf',predictor = 'HF status',output_path=path,pval='fdr') 
+# summary_plotter_limma(hf_limma_results, 'allpp_vs_hf',predictor = 'HF status',output_path=path, xlimits=c(-1,1.75),ylimits=c(0,200) )
+# summary_plotter_limma(hf_limma_results, 'allpp_vs_hf',predictor = 'HF status',output_path=path,pval='fdr', xlimits=c(-1,1.75),ylimits=c(0,200) )
 
 #Plotting only on the pp_of_interest
-hf_pp_vs_hcm_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(hf_limma_results %>% mutate(Label = ifelse(pp %in% pp_of_interest, Gene,'')), 'selectpp_vs_hf',predictor = 'HF status',output_path=path, specific_label=T) 
-hf_pp_vs_hcm_marginal_fdr5_summarytb_limma <- summary_plotter_limma(hf_limma_results %>% mutate(Label = ifelse(pp %in% pp_of_interest, Gene,'')), 'selectpp_vs_hf',predictor = 'HF status',output_path=path,pval='fdr', specific_label=T) 
+hf_pp_vs_hcm_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(hf_limma_results %>% mutate(Label = ifelse(pp %in% pp_of_interest, Gene,'')), 'selectpp_vs_hf',predictor = 'HF status',output_path=path, specific_label=T, xlimits=c(-1,1.75),ylimits=c(0,200),max_repel_overlaps=10000) 
+hf_pp_vs_hcm_marginal_fdr5_summarytb_limma <- summary_plotter_limma(hf_limma_results %>% mutate(Label = ifelse(pp %in% pp_of_interest, Gene,'')), 'selectpp_vs_hf',predictor = 'HF status',output_path=path,pval='fdr', specific_label=T, xlimits=c(-1,1.75),ylimits=c(0,200),max_repel_overlaps=10000 )
 
 rm(ukb_pp_hcm_cov_hf, path)
 ```
@@ -996,14 +1011,14 @@ if(isTRUE(include_nonCM_panels)){
   write_tsv(select(ukb_pp_list, UniProt),'./DATA/UKB/RAP/olink_cmpanel_uniprot.tsv', col_names=F) #Write out the background gene set
 }
 
-write_tsv(select(filter(ukb_pp_list, Target %in% filter(pp_vs_hcm_2_marginal_bonferroni_summarytb_limma, MTC_significant==T)$Gene),UniProt),
-          str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_V2/',extra_folders,'bonferroni_pass_uniprotIDs.tsv'), col_names=F)
+write_tsv(select(filter(ukb_pp_list, Target %in% filter(pp_vs_hcm_marginal_bonferroni_summarytb_limma, MTC_significant==T)$Gene),UniProt),
+          str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM/',extra_folders,'bonferroni_pass_uniprotIDs.tsv'), col_names=F)
 
-write_tsv(select(filter(ukb_pp_list, Target %in% filter(pp_vs_hcm_2_marginal_fdr1_summarytb_limma, MTC_significant==T)$Gene),UniProt),
-          str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_V2/',extra_folders,'fdr1_pass_uniprotIDs.tsv'), col_names=F)
+write_tsv(select(filter(ukb_pp_list, Target %in% filter(pp_vs_hcm_marginal_fdr1_summarytb_limma, MTC_significant==T)$Gene),UniProt),
+          str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM/',extra_folders,'fdr1_pass_uniprotIDs.tsv'), col_names=F)
 
-write_tsv(select(filter(ukb_pp_list, Target %in% filter(pp_vs_hcm_2_marginal_fdr5_summarytb_limma, MTC_significant==T)$Gene),UniProt),
-          str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_V2/',extra_folders,'fdr5_pass_uniprotIDs.tsv'), col_names=F)
+write_tsv(select(filter(ukb_pp_list, Target %in% filter(pp_vs_hcm_marginal_fdr5_summarytb_limma, MTC_significant==T)$Gene),UniProt),
+          str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM/',extra_folders,'fdr5_pass_uniprotIDs.tsv'), col_names=F)
 
 ```
 
@@ -1014,8 +1029,8 @@ I also use FEA via ClusterProfiler from Bioconductor package.
 library(clusterProfiler)
 library(org.Hs.eg.db)
 
-limma_results <- read_tsv(str_c('OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_V2/',extra_folders,'/limma_results.tsv'))
-fdr5_pass <- read_tsv(str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_V2/',extra_folders,'fdr5_pass_uniprotIDs.tsv'), col_names=F)
+limma_results <- read_tsv(str_c('OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM/',extra_folders,'/limma_results.tsv'))
+fdr5_pass <- read_tsv(str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM/',extra_folders,'fdr5_pass_uniprotIDs.tsv'), col_names=F)
 background_uniprot <- read_tsv('DATA/UKB/RAP/olink_allpanel_uniprot.tsv',col_names=F) %>% unique() #For allpanels
 
 ```
@@ -1379,50 +1394,87 @@ ukb_pp <- ukb_pp %>%
   left_join(ukb_cv_prs, by=c('eid'='ID'))
 ```
 
+# Re-analysis on Training Set Only
+
+This reruns the case-control association analysis only on the training set from ML (excluding the test set individuals).
+This starts from the ukb_pp_hcm_cov2 tibble btw which is saved as .tsv.
 
 ```{r}
-#Filter out those with NA values in cv_prs
-# ukb_pp <- ukb_pp %>%
-#   filter(!is.na(cv_prs))
-# 
-# sum(ukb_pp$hcm)
-# sum(ukb_pp$hcm ==F)
+train_eids <- read_csv('OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train_eid.csv')$eid
+test_eids <- read_csv('OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_test_eid.csv')$eid
 
-# write_tsv(ukb_pp,str_c('DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_cvprs.tsv'))
+#This uses the 5Y time instancing of HF cases 
+ukb_cases <- read_tsv('DATA/UKB/PROCESSED/2_5Y/ukb_rap_HCM_20240209_5Ycases.tsv')
+colnames(ukb_cases) <- c('ID')
 
-# rm(ukb_pp, ukb_cv_prs)
+rcmm_cov<-T
+include_nonCM_panels <- T
+
+instance <- '2_5Y'
+    
+if(isTRUE(include_nonCM_panels)){
+    ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+    ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_allpanel.tsv')
+
+  } else{
+    ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+    ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_cmpanel.tsv')
+  }
+
+pp <- ukb_pp_list$ukb_fieldname_equivalent[ukb_pp_list$ukb_fieldname_equivalent %in% colnames(ukb_pp_hcm_cov2)] %>%  #In case any PP are removed due to lack of non-NA values
+  unique()
+
 ```
-In reality, to maintain the same training and test sets are when there is no PRS added, I take the X_train and X_test datasets which have previously been split and add the cv_prs from the above tibble onto them and I rewrite it out.
 
 ```{r}
+#This is using non-HF and non-HCM as controls (as opposed to just using non-HCM) but using all HCM as cases
+ukb_pp_hcm_cov <- ukb_pp_hcm_cov2  %>%
+  mutate(hcm = case_when(eid %in% ukb_cases$ID ~ T, #HCM cases independent of HF status
+                         !eid %in% ukb_cases$ID & !eid %in% hf_eid$ID ~ F, #Non-HF non-HCM controls
+                         T~NA)) %>% #non-HCM and HF 
+  filter(!is.na(hcm))
 
-prs_adder <- function(prs_tb, folder_path='OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/'){
-  
-  files <- list.files(folder_path, full.names=T)
-  datasets <- map(files, ~read_csv(.) %>% mutate(index=row_number()))
-  names(datasets) <- str_match(files, str_c(folder_path,'([^\\.]+)\\.csv'))[,2]
-  
-  #Add the prs to each of the two datasets but can't do so by ID because ID lost in X_train and X_test so instead need to align the 10 genetic PCs
-  
-  X_datasets <- c(datasets['X_train'],datasets['X_test'])
-  y_datasets <- c(datasets['y_train'],datasets['y_test'])
-  rm(datasets)
-  
-  #Rename the prs_tb PC columns
-  colnames(prs_tb) <- c('ID','cv_prs', str_c('pc',1:10))
-  
-  joined_tbs <- map(X_datasets, ~left_join(., prs_tb, by=str_c('pc',1:10)))
-  
-  
+#Filter for training set individuals here
+
+ukb_pp_hcm_cov_train <- ukb_pp_hcm_cov %>%
+  filter(eid %in% train_eids)
+
+sum(ukb_pp_hcm_cov_train$hcm==T)
+sum(ukb_pp_hcm_cov_train$hcm==F)
+
+if (isTRUE(rcmm_cov)){ #If using the extended covariate list suggested by Rob Clarke and Mohsen
+  covars <- c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','t2d','smoking','Townsend','eGFR', 'ldl')
+} else{
+  covars <- c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','t2d','smoking')
 }
 
+#Reduce the search space only to plasma proteins which have non-NA values in at least 1 HCM case e.g exlcude glipr1 and others
+tic()
+#Running by default with age/sex/genetic PCs/dbp/T2D/smoking status covariates but comparing HCM cases to non-HF/HCM controls
+limma_hcm_train<- map(pp, ~limma_dpe(ukb_pp_hcm_cov_train,., covar=covars)) %>% bind_rows()
+toc()
 
-prs_X_train <- hcm_cc_5y_X_train %>%
-  left_join(ukb_cv_prs, by = )
+if (isTRUE(rcmm_cov)){
+   extra_folders <- 'rcmm_cov/'
+}
+if(isTRUE(include_nonCM_panels)){
+  extra_folders <- str_c(extra_folders, 'allpanels/')
+} 
+path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_Train/', extra_folders) #Define the folder for output of plots and tabular data
+if(!dir.exists(path)){dir.create(path, recursive=T)}
+limma_hcm_train <- left_join(limma_hcm_train, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent')) %>% unique()
+write_tsv(limma_hcm_train,str_c(path,'limma_results.tsv'))
 
-#Filter for those without cv_prs
+pp_vs_hcm_train_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm_train, 'allpp_vs_hcm_train',predictor = 'HCM status',output_path=path, xlimits=c(-1,1.75), ylimits=c(0,35)) 
 
+#Also for 5%FDR and 1%FDR
+pp_vs_hcm_train_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm_train, 'allpp_vs_hcm_train',predictor = 'HCM status',output_path=path, pval = 'fdr', xlimits=c(-1,1.75), ylimits=c(0,35)) 
+
+rm(ukb_pp_hcm_cov, path)
 ```
+
+
+
 
 ```{r}
 sessionInfo()
@@ -1585,3 +1637,49 @@ pearson_pairwise_ntprobnp <- pearson_pairwise_ntprobnp %>%
   pivot_longer(everything(), names_to='pp', values_to='r')
 ```
 
+
+## PRS Addition to ML Dataset
+
+```{r}
+#Filter out those with NA values in cv_prs
+# ukb_pp <- ukb_pp %>%
+#   filter(!is.na(cv_prs))
+# 
+# sum(ukb_pp$hcm)
+# sum(ukb_pp$hcm ==F)
+
+# write_tsv(ukb_pp,str_c('DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_cvprs.tsv'))
+
+# rm(ukb_pp, ukb_cv_prs)
+```
+In reality, to maintain the same training and test sets are when there is no PRS added, I take the X_train and X_test datasets which have previously been split and add the cv_prs from the above tibble onto them and I rewrite it out.
+
+```{r}
+
+prs_adder <- function(prs_tb, folder_path='OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/'){
+  
+  files <- list.files(folder_path, full.names=T)
+  datasets <- map(files, ~read_csv(.) %>% mutate(index=row_number()))
+  names(datasets) <- str_match(files, str_c(folder_path,'([^\\.]+)\\.csv'))[,2]
+  
+  #Add the prs to each of the two datasets but can't do so by ID because ID lost in X_train and X_test so instead need to align the 10 genetic PCs
+  
+  X_datasets <- c(datasets['X_train'],datasets['X_test'])
+  y_datasets <- c(datasets['y_train'],datasets['y_test'])
+  rm(datasets)
+  
+  #Rename the prs_tb PC columns
+  colnames(prs_tb) <- c('ID','cv_prs', str_c('pc',1:10))
+  
+  joined_tbs <- map(X_datasets, ~left_join(., prs_tb, by=str_c('pc',1:10)))
+  
+  
+}
+
+
+prs_X_train <- hcm_cc_5y_X_train %>%
+  left_join(ukb_cv_prs, by = )
+
+#Filter for those without cv_prs
+
+```
