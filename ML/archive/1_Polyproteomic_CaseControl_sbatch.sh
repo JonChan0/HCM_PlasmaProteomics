@@ -72,7 +72,19 @@ y_train_data_path='../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/y_train.csv'
 #     --feature_selection False \
 #     --model_output_folder $model_output_folder\
 #     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
-#     --target_variable $target_variable --X_train_data $X_train_data_path --y_train_data $y_train_data_path --filesuffix 'cov_ccFDR9only'
+#     --target_variable $target_variable --X_train_data $X_train_data_path --y_train_data $y_train_data_path --filesuffix 'cov_ccFDR6Trainonly'
+
+# echo 'Training model for xgboost with ONLY covariates + 9 FDR-passing plasma proteins from case-control analysis'
+# model_output_folder='../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/'
+# features_to_select='../DATA/UKB/ML/2_covariates_pp/cc_top9_names.csv'
+# X_train_data_path='../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_all.csv'
+# y_train_data_path='../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/y_all.csv'
+
+# python 1_Polyproteomic_ML_Train.py --model_name xgboost --plot_output_folder "$model_output_folder"4_XGB/ \
+#     --feature_selection False \
+#     --model_output_folder $model_output_folder\
+#     --features_to_bypass_fs $features_to_bypass --features_to_select_fs $features_to_select  \
+#     --target_variable $target_variable --X_train_data $X_train_data_path --y_train_data $y_train_data_path --filesuffix 'cov_ccFDR9only_XyALL'
 
 # echo 'Training model for svm'
 # python 1_Polyproteomic_ML_Train.py --model_name svm --plot_output_folder "$model_output_folder"5_SVM \

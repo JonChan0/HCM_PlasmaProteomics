@@ -1238,7 +1238,7 @@ saveRDS(multivariate_cox_results, str_c('OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instanc
 ```
 
 ```{r}
-multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, pp_scaling, FDR=5, specific_label=F){
+multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, pp_scaling, FDR=5, specific_label=F, ylimits=''){
   
   if (!is.numeric(FDR)){ #Apply Bonferroni
     pval_threshold = 0.05/nrow(multivariate_results)
@@ -1265,13 +1265,18 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
     geom_hline(yintercept=-log10(pval_threshold), linetype='dashed', alpha=0.5)+
     geom_point(alpha=0.75)+
     scale_colour_manual(name=ifelse(isFALSE(specific_label),'MTC Significant','PP of Interest'),values=c('FALSE'='grey','TRUE'='red'))+
-    geom_text_repel(aes(label=Label), nudge_y=15, max.overlaps=40)+
+    geom_text_repel(aes(label=Label), nudge_y=3, force = 5, max.overlaps=40)+
     #geom_errorbarh(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor),alpha=0.75, height=0.1)+
     xlab(ifelse(isFALSE(pp_scaling),'Hazard Ratio', 'Hazard Ratio per SD'))+
     ylab(ifelse(mtc=='Bonferroni','-log10 (Wald-test p value)', '-log10 (Adjusted Wald-test p value)'))+
     scale_x_continuous(n.breaks=10)+
     labs(title=str_wrap(str_c('Multivariate Cox Regression analysis for ', nrow(multivariate_results), ' plasma protein predictors')),caption=str_c(mtc, ' p-value Threshold Indicated'))+
     theme(legend.position="right")
+  
+  if(!identical(ylimits,'')){
+    multivariate_plot <- multivariate_plot+
+      scale_y_continuous(limits=ylimits)
+  }
   
   print(multivariate_plot)
   ggsave(str_c(plot_output_path, 'cox_multivariate_', output_name,'.png'), dpi=600, width=9, height=6)
@@ -1285,6 +1290,9 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
 path <- str_c('./OUTPUT/UKB/PLOTS/5_CoxHCMDiag/', instance,'/',extra_folders,'/')
 
 mvcox_incidentHCM_fdr5 <- multivariate_coxph_plotter(multivariate_cox_results, path, str_c('allCMpp_incidentHCMdiag_fdr5_pp',pp_scaling), pp_scaling=pp_scaling)
+
+multivariate_coxph_plotter(multivariate_cox_results, path, str_c('allCMpp_incidentHCMdiag_fdr5_pp_ylim30',pp_scaling), pp_scaling=pp_scaling, ylimits=c(0,30))
+
 multivariate_coxph_plotter(multivariate_cox_results, path, str_c('allCMpp_incidentHCMdiag_fdr1_pp',pp_scaling), FDR=1, pp_scaling=pp_scaling)
 multivariate_coxph_plotter(multivariate_cox_results, path, str_c('allCMpp_incidentHCMdiag_bonferroni_pp', pp_scaling), FDR=F, pp_scaling=pp_scaling)
 

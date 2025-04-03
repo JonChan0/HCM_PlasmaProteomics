@@ -39,23 +39,26 @@ pp_scaling <- 'ranknorm'
 
 #This is derived from `UKB_Plasma_Proteomics_Analysis.Rmd` and contains the HCM cases corresponding to the particular instance (I0; 5Y or Total)
 if(isTRUE(rcmm_cov)){
-  ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv',collapse=''))
+  ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv',collapse=''))
 } else {
-  ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking.tsv',collapse=''))
+  ukb_pp_hcm_cov2 <- read_tsv(str_c('./DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking.tsv',collapse=''))
 }
 
+ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_allpanel.tsv') %>%
+  filter(ukb_fieldname_equivalent != 'glipr1')
+
 if (pp_scaling == 'scale'){
-  pp <- ukb_pp_hcm_cov2 %>% select('nppb':'npc2') %>%
+  pp <- ukb_pp_hcm_cov2 %>% select(all_of(ukb_pp_list$ukb_fieldname_equivalent)) %>%
     scale()
   
   ukb_pp_hcm_cov2 <- ukb_pp_hcm_cov2 %>%
-    select(-('nppb':'npc2')) %>%
+    select(-all_of(ukb_pp_list$ukb_fieldname_equivalent)) %>%
     bind_cols(pp)
   rm(pp)
   
 }else if (pp_scaling == 'ranknorm'){
   ukb_pp_hcm_cov2 <- ukb_pp_hcm_cov2 %>%
-    mutate(across(nppb:npc2, ~ replace(., !is.na(.), RNOmni::RankNorm(.[!is.na(.)]))))
+    mutate(across(all_of(ukb_pp_list$ukb_fieldname_equivalent), ~ replace(., !is.na(.), RNOmni::RankNorm(.[!is.na(.)]))))
 }
 
 #Check the distribution of NTproBNP and HRC 
@@ -508,7 +511,7 @@ Now plot a summary plot of the results for each predictor.
 
 ```{r multivariate_cox_plotter, fig.width=9, fig.height=6, message=F,warning=F}
 
-multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, selected_vars = c('ntprobnp','hrc','ace2'),FDR=5, xlim=c(0,8), ylim=c(0,7), pp_scaling =F){
+multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, output_name, selected_vars = c('ntprobnp','hrc','ace2'),FDR=5, xlim=c(0,10), ylim=c(0,6), pp_scaling =F){
   
   if (!is.numeric(FDR)){ #Apply Bonferroni
     pval_threshold = 0.05/nrow(multivariate_results)
@@ -558,10 +561,12 @@ if(isTRUE(rcmm_cov)){
 multivariate_cox_results <- multivariate_cox_results %>%
   mutate(predictor = factor(predictor, levels=c('NTPROBNP','HRC', 'ACE2')))
 
-multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_alloutcomes_fdr5', selected_vars=c('ntprobnp'), pp_scaling = pp_scaling)
-multivariate_coxph_plotter(multivariate_cox_results,path, 'hrc_alloutcomes_fdr5', selected_vars=c('hrc'), pp_scaling = pp_scaling)
-multivariate_coxph_plotter(multivariate_cox_results,path, 'allpp_alloutcomes_fdr5', pp_scaling = pp_scaling)
-multivariate_coxph_plotter(multivariate_cox_results, path, 'allpp_alloutcomes_bonferroni', FDR=F, ylim=c(0,8), pp_scaling = pp_scaling)
+multivariate_coxph_plotter(multivariate_cox_results,path, 'ntprobnp_alloutcomes_fdr5', selected_vars=c('ntprobnp'), pp_scaling = pp_scaling,xlim=c(0,6))
+multivariate_coxph_plotter(multivariate_cox_results,path, 'hrc_alloutcomes_fdr5', selected_vars=c('hrc'), pp_scaling = pp_scaling,xlim=c(0,6))
+multivariate_coxph_plotter(multivariate_cox_results,path, 'allpp_alloutcomes_fdr5', pp_scaling = pp_scaling,xlim=c(0,6))
+multivariate_coxph_plotter(multivariate_cox_results, path, 'allpp_alloutcomes_bonferroni', FDR=F, xlim=c(0,6), pp_scaling = pp_scaling)
+
+write_tsv(multivariate_cox_results, str_c(path,'multivariate_cox_results.tsv'))
 
 ```
 ### Cox Assumptions

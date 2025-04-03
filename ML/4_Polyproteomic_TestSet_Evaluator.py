@@ -11,7 +11,7 @@ import sklearn
 import numpy as np
 from scipy.stats import bootstrap
 import shap
-
+import os
 
 sklearn.set_config(transform_output="pandas")
 
@@ -39,9 +39,6 @@ def evaluate_model(model, X_test, y_test, plot_output_path, model_name, n_bootst
             # For multi-class, probabilities are returned per class
             # Take the class with highest probability
             y_pred = np.argmax(y_pred_proba, axis=1)
-    else:
-        
-
 
     # Calculate metrics
     balanced_accuracy = balanced_accuracy_score(y_test, y_pred)
@@ -84,6 +81,10 @@ def evaluate_model(model, X_test, y_test, plot_output_path, model_name, n_bootst
 
     print(f'AUC: {mean_auc:.2f}')
     print(f'95% CI for AUC: [{ci_lower:.2f}, {ci_upper:.2f}]')
+
+    #If output folder not present, create it
+    if not os.path.exists(plot_output_path):
+        os.makedirs(plot_output_path)
     
     # Plot confusion matrix at various decision thresholds
     thresholds = [0.1, 0.25, 0.5, 0.75, 0.9]
