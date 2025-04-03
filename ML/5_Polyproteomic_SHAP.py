@@ -15,6 +15,7 @@ import argparse
 import sklearn
 from adjustText import adjust_text
 from sklearn.feature_selection import f_classif
+from sklearn.utils import resample
 
 sklearn.set_config(transform_output="pandas")
 
@@ -65,7 +66,7 @@ def plot_shap_plots(shap_values, model_name, n_features, output_folder, suffix='
     plt.figure(figsize=(10, 6))
     plt.barh(feature_names_sorted, shap_mean_sorted, xerr=shap_std_sorted, color='skyblue')
     plt.gca().invert_yaxis()
-    plt.xlabel("Mean SHAP Value")
+    plt.xlabel("Mean |SHAP|")
     plt.title(f'Mean Absolute SHAP Values for each of {n_features} features')
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder, f"{model_name}_shap_barplot{suffix}.png"))
@@ -160,6 +161,57 @@ def plot_shap_vs_Fratio(mean_shap_df, fratio_df, model_name, output_folder, top_
     plt.close()
     print(f"Feature importance vs F-ratio plot saved for {model_name}")
 
+def bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05):
+    """
+    Perform bootstrapping by resampling X_train and computing SHAP values for each bootstrap sample.
+    Returns mean, lower bound, and upper bound for each feature.
+    """
+    n_samples = X.shape[0]
+    n_features = X.shape[1]
+    bootstrap_means = np.zeros((n_iterations, n_features))
+    
+    explainer = shap.Explainer(model.named_steps['classifier'])
+    
+    for i in range(n_iterations):
+        X_resampled = resample(X, replace=True, n_samples=n_samples, random_state=i)
+        shap_explainer_obj = explainer(X_resampled)
+        shap_values = shap_explainer_obj.values
+        bootstrap_means[i, :] = np.abs(shap_values).mean(axis=0)
+    
+    mean_vals = np.mean(bootstrap_means, axis=0)
+    lower_bound = np.percentile(bootstrap_means, 100 * (alpha / 2), axis=0)
+    upper_bound = np.percentile(bootstrap_means, 100 * (1 - alpha / 2), axis=0)
+
+    # Extract feature names directly from shap_values
+    feature_names = shap_explainer_obj.feature_names
+    
+    return mean_vals, lower_bound, upper_bound, feature_names
+
+def plot_bootstrap_shap(mean_vals, lower_bound, upper_bound, feature_names, n_features, model_name, output_folder, suffix=''):
+    """
+    Plot the bootstrapped SHAP values with confidence intervals.
+    """
+    # Sort by mean magnitude
+    sorted_idx = np.argsort(mean_vals)[::-1]
+
+    #Filter mean_vals, lower_bound, upper_bound, feature_names to n_features
+    mean_vals = mean_vals[sorted_idx][:n_features]
+    lower_bound = lower_bound[sorted_idx][:n_features]
+    upper_bound = upper_bound[sorted_idx][:n_features]
+    feature_names = np.array(feature_names)[sorted_idx][:n_features]
+
+    plt.figure(figsize=(10, 6))
+    plt.barh(feature_names, mean_vals, xerr=[mean_vals - lower_bound, upper_bound - mean_vals], color='skyblue')
+    plt.gca().invert_yaxis()
+    plt.xlabel("Mean |SHAP|")
+    plt.title(f'Bootstrapped Mean Absolute SHAP Values for {model_name}')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_folder, f"{model_name}_bootstrapped_shap{suffix}.png"))
+    # plt.show()
+    plt.close()
+
+    print(f"Bootstrapped SHAP values plot saved for {model_name}")
+
 #############################################################################################
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluate a saved model on a test set and output performance plots.')
@@ -214,4 +266,23 @@ if __name__ == "__main__":
     fratio_df = pd.DataFrame({'Feature': pp_names, 'F-ratio': fvalues})
     mean_shap_filtered_df = shap_to_df(shap_values_filtered)
     mean_shap_filtered_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_mean_abs_shap_values.csv'), index=False)
+
     plot_shap_vs_Fratio(mean_shap_filtered_df, fratio_df, args.model_name, args.plot_output_path)
+
+    # Compute the SHAP plots with bootstrapping of the X dataset to compute 95% confidence intervals for the SHAP values for each feature
+    # This is done by resampling the X dataset and computing the SHAP values for each bootstrap sample
+    # and then taking the mean and 95% confidence intervals for each feature
+    print("Computing bootstrapped SHAP values...")
+    mean_vals, lower_bound, upper_bound, feature_names = bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05)
+    print("Bootstrapped SHAP values computed.")
+
+    plot_bootstrap_shap(mean_vals, lower_bound, upper_bound, feature_names,  len(feature_names),args.model_name, args.plot_output_path)
+
+    #Filter these values to only include the plasma proteins
+    feature_names_filtered = np.array(feature_names)[np.isin(feature_names, pp_names)]
+    mean_vals_filtered = mean_vals[np.isin(feature_names, pp_names)]
+    lower_bound_filtered = lower_bound[np.isin(feature_names, pp_names)]
+    upper_bound_filtered = upper_bound[np.isin(feature_names, pp_names)]
+
+    # Plot the bootstrapped SHAP values with confidence intervals
+    plot_bootstrap_shap(mean_vals_filtered, lower_bound_filtered, upper_bound_filtered, feature_names_filtered,  len(feature_names_filtered),args.model_name, args.plot_output_path, suffix='ppfiltered')
