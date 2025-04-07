@@ -161,6 +161,40 @@ def plot_shap_vs_Fratio(mean_shap_df, fratio_df, model_name, output_folder, top_
     plt.close()
     print(f"Feature importance vs F-ratio plot saved for {model_name}")
 
+##############################################
+# New functions for SHAP interaction analysis #
+##############################################
+def filter_shap_interaction_values(interaction_values, feature_names, features_to_keep):
+    """
+    Filter the SHAP interaction values to only include the specified features.
+    interaction_values: numpy array with shape (n_samples, n_features, n_features)
+    feature_names: list of feature names corresponding to the second and third axes
+    features_to_keep: list of feature names to retain
+    """
+    indices = [feature_names.index(feature) for feature in features_to_keep]
+    # Filter along both feature dimensions
+    filtered_interaction = interaction_values[:, indices, :][:, :, indices]
+    return filtered_interaction
+
+def plot_shap_interaction_heatmap(mean_interaction, feature_names, model_name, output_folder, suffix=''):
+    """
+    Plot a heatmap of the mean absolute SHAP interaction values.
+    mean_interaction: 2D numpy array of shape (n_features, n_features)
+    feature_names: list of feature names corresponding to the matrix dimensions
+    """
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(mean_interaction, xticklabels=feature_names, yticklabels=feature_names,
+                cmap='viridis', annot=True, fmt=".3f")
+    plt.title(f"Mean Absolute SHAP Interaction Values - {model_name}")
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_folder, f"{model_name}_shap_interaction_heatmap{suffix}.png"))
+    plt.close()
+
+##############################################
+# New functions for SHAP Bootstrapping #
+##############################################
+
 def bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05):
     """
     Perform bootstrapping by resampling X_train and computing SHAP values for each bootstrap sample.
@@ -221,7 +255,12 @@ if __name__ == "__main__":
     parser.add_argument('--plot_output_path', type=str, required=True, help='Path to save the output plots')
     parser.add_argument('--model_name', type=str, required=True, help='Name of the model for plot titles and filenames')
     parser.add_argument('--pp_names_file', type=str, required=True, help="CSV file containing the plasma protein names")
+    parser.add_argument('--bootstrap_or_not', type=str, default='no', help='Whether to compute bootstrapped SHAP values or not. Default is "no".')
     args = parser.parse_args()
+
+    ##############################################
+    # Preparation and computation of SHAP values  #
+    ##############################################
 
     # Create the output folder if it does not exist
     if not os.path.exists(args.plot_output_path):
@@ -238,6 +277,10 @@ if __name__ == "__main__":
     model = load_model(args.model_pkl_file)
     explainer = shap.Explainer(model.named_steps['classifier'])
     shap_values = explainer(X)
+
+    ##############################################
+    # Compute and plot basic SHAP plots comparing features  #
+    ##############################################
 
     # Plot SHAP summary plot for all features in the model
     if len(X.columns) <= 50: #Only plot all the features if the number of total features is <= 50
@@ -258,8 +301,9 @@ if __name__ == "__main__":
     #Plot the SHAP dependence plots for the top_n_features
     dependence_shap_plotter(shap_values_filtered, args.model_name, args.plot_output_path, top_n=5)
 
-    #Plot the SHAP values against the F-ratio
-    #Also plot a F-value plot vs. mean absolute SHAP value plot
+    ##############################################
+    # Compute and plot SHAP values against the F-ratio   #
+    ##############################################
 
     #Compute the F-ratio for the plasma proteins in the X_train data file given that X is a dataframe
     fvalues = f_classif(X.loc[:,pp_names], pd.read_csv(args.y_train_path).values.ravel())[0]
@@ -269,24 +313,50 @@ if __name__ == "__main__":
 
     plot_shap_vs_Fratio(mean_shap_filtered_df, fratio_df, args.model_name, args.plot_output_path)
 
-    # Compute the SHAP plots with bootstrapping of the X dataset to compute 95% confidence intervals for the SHAP values for each feature
-    # This is done by resampling the X dataset and computing the SHAP values for each bootstrap sample
-    # and then taking the mean and 95% confidence intervals for each feature
-    print("Computing bootstrapped SHAP values...")
-    mean_vals, lower_bound, upper_bound, feature_names = bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05)
-    #Save these values to a csv file
-    bootstrap_shap_df = pd.DataFrame({'Feature': feature_names, 'Mean SHAP': mean_vals, 'Lower Bound': lower_bound, 'Upper Bound': upper_bound})
-    bootstrap_shap_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values.csv'), index=False)
-    print(f"Bootstrapped SHAP values saved to {os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values.csv')}")
-    print("Bootstrapped SHAP values computed.")
+    ##############################################
+    # Compute and plot SHAP interaction values   #
+    ##############################################
+    print("Computing SHAP interaction values...")
+    # Compute interaction values for the entire dataset
+    shap_interaction_values = explainer.shap_interaction_values(X)
+    # Filter to plasma proteins only
+    shap_interaction_values_filtered = filter_shap_interaction_values(
+        shap_interaction_values, X.columns.values.tolist(), pp_names)
+    # Compute the mean absolute interaction values across samples
+    mean_interaction_filtered = np.abs(shap_interaction_values_filtered).mean(axis=0)
+    # Plot a heatmap for the plasma protein interaction effects
+    plot_shap_interaction_heatmap(mean_interaction_filtered, pp_names, args.model_name, args.plot_output_path, suffix='_ppfiltered')
+    print("SHAP interaction values computed and plotted.")
 
-    plot_bootstrap_shap(mean_vals, lower_bound, upper_bound, feature_names,  len(feature_names),args.model_name, args.plot_output_path)
+    ##############################################
+    # Compute and plot SHAP bootstrap distributions for 95% confidence interval estimation of per-feature mean |SHAP|   #
+    ##############################################
 
-    #Filter these values to only include the plasma proteins
-    feature_names_filtered = np.array(feature_names)[np.isin(feature_names, pp_names)]
-    mean_vals_filtered = mean_vals[np.isin(feature_names, pp_names)]
-    lower_bound_filtered = lower_bound[np.isin(feature_names, pp_names)]
-    upper_bound_filtered = upper_bound[np.isin(feature_names, pp_names)]
+    if args.bootstrap_or_not == 'no':
+        print("Bootstrapping not requested. Skipping bootstrapped SHAP values.")
+        exit(0)
+    elif args.bootstrap_or_not == 'yes':
+        # Compute the SHAP plots with bootstrapping of the X dataset to compute 95% confidence intervals for the SHAP values for each feature
+        # This is done by resampling the X dataset and computing the SHAP values for each bootstrap sample
+        # and then taking the mean and 95% confidence intervals for each feature
+        print("Computing bootstrapped SHAP values...")
+        mean_vals, lower_bound, upper_bound, feature_names = bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05)
+        #Save these values to a csv file
+        bootstrap_shap_df = pd.DataFrame({'Feature': feature_names, 'Mean SHAP': mean_vals, 'Lower Bound': lower_bound, 'Upper Bound': upper_bound})
+        bootstrap_shap_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values.csv'), index=False)
+        print(f"Bootstrapped SHAP values saved to {os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values.csv')}")
+        print("Bootstrapped SHAP values computed.")
 
-    # Plot the bootstrapped SHAP values with confidence intervals
-    plot_bootstrap_shap(mean_vals_filtered, lower_bound_filtered, upper_bound_filtered, feature_names_filtered,  len(feature_names_filtered),args.model_name, args.plot_output_path, suffix='ppfiltered')
+        plot_bootstrap_shap(mean_vals, lower_bound, upper_bound, feature_names,  len(feature_names),args.model_name, args.plot_output_path)
+
+        #Filter these values to only include the plasma proteins
+        feature_names_filtered = np.array(feature_names)[np.isin(feature_names, pp_names)]
+        mean_vals_filtered = mean_vals[np.isin(feature_names, pp_names)]
+        lower_bound_filtered = lower_bound[np.isin(feature_names, pp_names)]
+        upper_bound_filtered = upper_bound[np.isin(feature_names, pp_names)]
+
+        # Plot the bootstrapped SHAP values with confidence intervals
+        plot_bootstrap_shap(mean_vals_filtered, lower_bound_filtered, upper_bound_filtered, feature_names_filtered,  len(feature_names_filtered),args.model_name, args.plot_output_path, suffix='ppfiltered')
+
+
+

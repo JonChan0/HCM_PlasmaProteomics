@@ -12,20 +12,7 @@ conda activate python3.11_ml
 # Set the number of threads for Python
 export OMP_NUM_THREADS=2
 
-#Define the model name here e.g logistic_regression, xgboost, svm, l1_logistic_regression_nofs
-# model_name=xgboost_nofs 
-# model_name=xgboost_nofs_cov_ccFDR9only
-# echo Performing SHAP computation for trained model $model_name
-
-# python 5_Polyproteomic_SHAP.py \
-#     --model_pkl_file ../OUTPUT/UKB/ML/2_models/1_hcm_cc_noprs/"$model_name"_best_model.pkl \
-#     --model_name $model_name \
-#     --X_train_preprocessed_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train_preprocessed_"$model_name".csv \
-#     --y_train_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/y_train.csv \
-#     --plot_output_path ../OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap \
-#     --pp_names_file=../DATA/UKB/ML/2_covariates_pp/ML_pp_names.csv
-
-#Train with X_all and y_all
+#Define the model name here e.g logistic_regression, xgboost, svm, l1_logistic_regression_nof
 model_name=xgboost_nofs_cov_ccFDR9only_XyALL
 echo Performing SHAP computation for trained model $model_name
 
@@ -35,4 +22,4 @@ python 5_Polyproteomic_SHAP.py \
     --X_train_preprocessed_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train_preprocessed_"$model_name".csv \
     --y_train_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/y_all.csv \
     --plot_output_path ../OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap \
-    --pp_names_file=../DATA/UKB/ML/2_covariates_pp/ML_pp_names.csv
+    --pp_names_file=../DATA/UKB/ML/2_covariates_pp/ML_pp_names.csv 
