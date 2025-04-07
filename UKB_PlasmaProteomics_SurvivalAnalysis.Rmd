@@ -160,9 +160,10 @@ ukb_tb <- ukb_pp_hcm_outcome %>%
 
 This enables you to select continuous variables to bin into groups/categorical variables for plotting of Kaplan Meier analyses.
 
-This is required for all the 
-
 ```{r}
+
+pp_of_interest <- c('ntprobnp','hrc','ace2','tnni3','angpt2')
+
 contvar_binner <- function(input_tb, variable, threshold, signif=F){ #Assumes split into two groups
   newcolname <- str_c(variable,'_categorical')
   
@@ -173,9 +174,10 @@ contvar_binner <- function(input_tb, variable, threshold, signif=F){ #Assumes sp
   return(output)
 }
 
-ukb_tb <- contvar_binner(ukb_tb, 'ntprobnp', signif(quantile(ukb_tb$ntprobnp,probs=0.75,na.rm=T),3)) %>%
-  contvar_binner('hrc',signif(quantile(ukb_tb$hrc,probs=0.75,na.rm=T),3)) %>%
-  contvar_binner('ace2',signif(quantile(ukb_tb$ace2,probs=0.75,na.rm=T),3))
+for (pp in pp_of_interest){
+  ukb_tb <- contvar_binner(ukb_tb, pp, signif(quantile(ukb_tb[pp],probs=0.75,na.rm=T),3))
+}
+rm(pp)
 ```
 
 
@@ -191,44 +193,58 @@ Such variables include
 
 I also change the y-axis to output cumulative incidence of events as well as cumulative hazard (number of events that would be expected for each individual by time t if the event were a repeatable process).
 
-```{r kaplan_meier, fig.width=9, fig.height=10, message=F, warning=F}
-km_survival_curv_plotter <- function(input_tb, categorical_var, status, outcome_var, plot_output_folder){ #outcome_var = Define the column for age at first occurence of selected outcome of interest
+
+```{r}
+km_survival_curv_plotter <- function(input_tb, categorical_var, status, outcome_var, plot_output_folder){
+  # categorical_var, status, and outcome_var are now expected as strings
+  print(paste('Plotting Kaplan Meier survival curves for', categorical_var))
   
-  print(str_c('Plotting Kaplan Meier survival curves for', deparse(substitute(categorical_var)),sep=' '))
-    
-    plot_types <- c('pct','event', 'cumhaz')
-    
-    for (type in plot_types){
-    
-      params <- list(fun.time = substitute(outcome_var),
-    fun.event = substitute(status),
-    grouping = substitute(categorical_var), 
-    fun.dat = substitute(input_tb),
-    type=type)
-          
-          plot <- substitute(ggsurvplot(
-      fit= survfit(Surv(time = fun.time, event = fun.event) ~ grouping, data = fun.dat),
-      fun=type,
-      pval=T, conf.int=T, risk.table='abs_pct',risk.table.col='strata',linetype='strata', surv.median.line='hv',xlab='Age',ncensor.plot=T), params)
-    
-    plot <- eval.parent(plot)
+  plot_types <- c('pct', 'event', 'cumhaz')
   
+  # Construct the survival formula as a formula object
+  surv_formula <- as.formula(paste0("Surv(", outcome_var, ", ", status, ") ~ ", categorical_var))
+  
+  for (type in plot_types){
+    # Fit the survival model using the constructed formula
+    surv_fit <- survfit(surv_formula, data = input_tb)
+    
+    # Update the call in the fitted object so that the data and formula are directly accessible.
+    surv_fit$call$data <- input_tb
+    surv_fit$call$formula <- surv_formula
+    
+    # Generate the survival plot using ggsurvplot
+    plot <- ggsurvplot(
+      fit = surv_fit,
+      fun = type,
+      pval = TRUE,
+      conf.int = TRUE,
+      risk.table = 'abs_pct',
+      risk.table.col = 'strata',
+      linetype = 'strata',
+      surv.median.line = 'hv',
+      xlab = 'Age',
+      ncensor.plot = TRUE
+    )
+    
     print(plot)
     
-    if (isFALSE(dir.exists(plot_output_folder))){
-      dir.create(plot_output_folder, recursive=T)
+    # Create output folder if it does not exist
+    if (!dir.exists(plot_output_folder)){
+      dir.create(plot_output_folder, recursive = TRUE)
     }
     
-    pdf(str_c(plot_output_folder,deparse(substitute(categorical_var)),'_kaplan_',type,'.pdf'), width=12, height=9)
-    print(plot, newpage=F)
+    # Save plot to a PDF file
+    pdf(file.path(plot_output_folder, paste0(categorical_var, '_kaplan_', type, '.pdf')), width = 12, height = 9)
+    print(plot, newpage = FALSE)
     dev.off()
-    }
+  }
 }
+
 ```
 
 
 ```{r kaplan_meier, fig.width=9, fig.height=10, message=F, warning=F}
-outcomes_of_interest <- c('1_VA','2_HF','3_OV','4_AF')
+outcomes_of_interest <- c('1_VA','2_HF','3_OV')
 
 if(isTRUE(rcmm_cov)){
   plotpaths <- str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/1_UNIVARIATE_KM/',instance,'/', outcomes_of_interest,'/rcmm_cov/') #Need to run separate results because 103 cases -> 100 cases when using expanded covariates
@@ -236,37 +252,22 @@ if(isTRUE(rcmm_cov)){
   plotpaths <- str_c('./OUTPUT/UKB/PLOTS/4_SURVIVAL/1_UNIVARIATE_KM/',instance,'/', outcomes_of_interest,'/') 
 }
 
+catvars_of_interest <- str_c(pp_of_interest, '_categorical')
 
 #Run for UKB - Overall Composite
-km_survival_curv_plotter(ukb_tb,sex,overallcomp_status, overallcomp_age, plotpaths[3]) #Using sex
-km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of NTproBNP
-km_survival_curv_plotter(ukb_tb,hrc_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of HRC
-
-# km_survival_curv_plotter(ukb_tb,ace2_categorical,overallcomp_status,overallcomp_age, plotpaths[3]) #Using top 25% vs. bottom 75% of ACE2
+walk(catvars_of_interest, ~km_survival_curv_plotter(ukb_tb, ., 'overallcomp_status','overallcomp_age',plotpaths[3])) #Using top 25% vs. bottom 75%
 
 #Run for UKB - HF Composite
-km_survival_curv_plotter(ukb_tb,sex,hfcomp_status, hfcomp_age, plotpaths[2]) #Using sex
-km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,hfcomp_status,hfcomp_age, plotpaths[2]) #Using top 25% vs. bottom 75% of NTproBNP
-km_survival_curv_plotter(ukb_tb,hrc_categorical,hfcomp_status,hfcomp_age, plotpaths[2]) #Using top 25% vs. bottom 75% of HRC
-
-# km_survival_curv_plotter(ukb_tb,ace2_categorical,hfcomp_status,hfcomp_age, plotpaths[2])
+walk(catvars_of_interest, ~km_survival_curv_plotter(ukb_tb, ., 'hfcomp_status','hfcomp_age',plotpaths[2])) 
 
 #Run for UKB - VA Composite
-km_survival_curv_plotter(ukb_tb,sex,vacomp_status, vacomp_age, plotpaths[1]) #Using sex
-km_survival_curv_plotter(ukb_tb,ntprobnp_categorical,vacomp_status,vacomp_age, plotpaths[1]) #Using top 25% vs. bottom 75% of NTproBNP
-km_survival_curv_plotter(ukb_tb,hrc_categorical,vacomp_status,vacomp_age, plotpaths[1]) #Using top 25% vs. bottom 75% of HRC
-
-# km_survival_curv_plotter(ukb_tb,ace2_categorical,vacomp_status,vacomp_age, plotpaths[1])
-
-#Run for UKB - AF
-km_survival_curv_plotter(ukb_tb,hrc_categorical,af_status,af_age, plotpaths[4]) #Using top 25% vs. bottom 75% of HRC
+walk(catvars_of_interest, ~km_survival_curv_plotter(ukb_tb, ., 'vacomp_status','vacomp_age',plotpaths[1])) 
 ```
 # Cox Regression
 
 This is used to model the survival function (via the hazard function) for event composite Y with regards to covariates + plasma protein X (i.e marginal models).
 
-I will limit the plasma proteins to a select few which passed the Bonferroni correction e.g
-
+I will limit the plasma proteins to a select few e.g
 - NTproBNP: positive control
 - HRC: novel biomarker
 
