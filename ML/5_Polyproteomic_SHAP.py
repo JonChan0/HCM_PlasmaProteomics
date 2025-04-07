@@ -274,6 +274,10 @@ if __name__ == "__main__":
     # and then taking the mean and 95% confidence intervals for each feature
     print("Computing bootstrapped SHAP values...")
     mean_vals, lower_bound, upper_bound, feature_names = bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05)
+    #Save these values to a csv file
+    bootstrap_shap_df = pd.DataFrame({'Feature': feature_names, 'Mean SHAP': mean_vals, 'Lower Bound': lower_bound, 'Upper Bound': upper_bound})
+    bootstrap_shap_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values.csv'), index=False)
+    print(f"Bootstrapped SHAP values saved to {os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values.csv')}")
     print("Bootstrapped SHAP values computed.")
 
     plot_bootstrap_shap(mean_vals, lower_bound, upper_bound, feature_names,  len(feature_names),args.model_name, args.plot_output_path)

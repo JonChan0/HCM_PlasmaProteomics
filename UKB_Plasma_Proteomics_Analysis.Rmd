@@ -1112,17 +1112,17 @@ if(isTRUE(include_nonCM_panels)){
 }
 
 if (pp_scaling == 'scale'){
-  pp <- ukb_pp %>% select('nppb':'npc2') %>%
+  pp <- ukb_pp %>% select(all_of(ukb_pp_list$ukb_fieldname_equivalent)) %>%
     scale()
   
   ukb_pp <- ukb_pp %>%
-    select(-('nppb':'npc2')) %>%
+    select(-all_of(ukb_pp_list$ukb_fieldname_equivalent)) %>%
     bind_cols(pp)
   rm(pp)
   
 }else if (pp_scaling == 'ranknorm'){
   ukb_pp <- ukb_pp %>%
-    mutate(across(nppb:npc2, ~ replace(., !is.na(.), RNOmni::RankNorm(.[!is.na(.)]))))
+    mutate(across(all_of(ukb_pp_list$ukb_fieldname_equivalent), ~ replace(., !is.na(.), RNOmni::RankNorm(.[!is.na(.)]))))
 }
 
 if (isTRUE(rcmm_cov)){
