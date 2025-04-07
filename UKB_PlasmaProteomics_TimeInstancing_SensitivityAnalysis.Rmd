@@ -637,10 +637,10 @@ cox_lag_results <- diagrds_importer('OUTPUT/UKB/PLOTS/5_CoxHCMDiag//0_TimeInstan
 
 #Filter out outlier year of 14Y time instance (some instability in Cox regression likely)
 cox_lag_results <- cox_lag_results %>%
-  filter(lag != 14)
+  filter(lag <= 12)
 
 cox_lag_results <- cox_lag_results %>%
-  dplyr::rename(pp=var) %>%
+  # dplyr::rename(pp=var) %>%
   group_by(lag) %>%
   mutate(fdr_pval = p.adjust(p.value, method='BH')) %>%
   ungroup() %>%
@@ -652,7 +652,7 @@ cox_lag_results <- cox_lag_results %>%
   mutate(ln_abs_beta = log1p(abs(beta))) %>%
   mutate(neglog10_fdr_pval = -log10(fdr_pval))
 
-fdr5_Cox_pp_all_lag <- as.character(unique(filter(cox_lag_results, fdr5_pass_all_lags==T)$pp)) #186 plasma proteins are FDR5-sig. in at least one time instance
+fdr5_Cox_pp_all_lag <- as.character(unique(filter(cox_lag_results, fdr5_pass_all_lags==T)$pp)) #11 plasma proteins are FDR5-sig. in at least one time instance
 # fdr5_Cox_pp_all_lag_thresh2 <- as.character(unique(filter(cox_lag_results, num_instances_sig >=2)$pp)) #7 plasma proteins pass FDR significance in at least 2 time instances
 ```
 
