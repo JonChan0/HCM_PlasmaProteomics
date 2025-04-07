@@ -27,7 +27,7 @@ results_folder <- 'OUTPUT/UKB/PLOTS/6_MR_Summary/'
 ukb_pps <- c(
   'NTproBNP','NPPB','TNNI3','HRC','ANGPT2','LTBP2','STC2','ACE2','F7'
 ) #9 plasma proteins but TNNI3 doesn't have an instrument so expected analyses = 7 x 2 + 1 + 1 = 16. ACE2 also has a very pleiotropic instrument.
-hcmr_pps <- c('NTproBNP','TnTStat') #4 analyses expected
+hcmr_pps <- c('NTproBNP','TnTStat', 'mmp1','st2') #8 analyses expected
 
 ```
 
