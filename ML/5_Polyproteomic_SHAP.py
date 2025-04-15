@@ -79,7 +79,7 @@ def plot_shap_plots(shap_values, model_name, n_features, output_folder, suffix='
     plt.savefig(os.path.join(output_folder, f"{model_name}_shap_beeswarm{suffix}.png"))
     plt.close()
 
-def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, color_by=None):
+def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, color_by=None, suffix=''):
     """
     Plot SHAP dependence plots for the top_n features.
     Optionally color points by a provided array (e.g., case/control status).
@@ -96,7 +96,7 @@ def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, col
     top_indices = np.argsort(-feature_importance)[:top_n]  # Get indices of top features
 
     # Create a figure with subplots but make the dimensions of the figure depdendent on the top_n input
-    fig, axes = plt.subplots(nrows=(top_n + 1) // 2, ncols=2, figsize=(12, 6 * ((top_n + 1) // 2)), constrained_layout=True)
+    fig, axes = plt.subplots(nrows=(top_n + 1) // 3, ncols=3, figsize=(12, 6 * ((top_n + 1) // 3)))
     axes = axes.flatten()  # Flatten for easier indexing
 
     # Plot each feature dependence plot in its own subplot
@@ -118,7 +118,7 @@ def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, col
 
     # Add an overall title to the figure
     fig.suptitle(f'SHAP Dependence Plots for Top {top_n} Features', fontsize=16, y=0.98)
-    plt.savefig(os.path.join(output_folder, f'{model_name}_top{top_n}_dependence_plots.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_folder, f'{model_name}_top{top_n}_dependence_plots{suffix}.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
 def mean_shap_to_df(shap_values):
@@ -541,9 +541,9 @@ if __name__ == "__main__":
     plot_shap_plots(shap_values_combined_filtered, args.model_name, len(pp_names), args.plot_output_path, '_combined_ppfiltered')
 
     # Plot SHAP dependence plots for filtered features
-    dependence_shap_plotter(shap_values_cases_filtered, args.model_name, args.plot_output_path, top_n=9)
-    dependence_shap_plotter(shap_values_controls_filtered, args.model_name, args.plot_output_path, top_n=9)
-    dependence_shap_plotter(shap_values_combined_filtered, args.model_name, args.plot_output_path, top_n=9, color_by=y)
+    dependence_shap_plotter(shap_values_cases_filtered, args.model_name, args.plot_output_path, top_n=9,suffix='_cases_ppfiltered')
+    dependence_shap_plotter(shap_values_controls_filtered, args.model_name, args.plot_output_path, top_n=9,suffix='_controls_ppfiltered')
+    dependence_shap_plotter(shap_values_combined_filtered, args.model_name, args.plot_output_path, top_n=9, color_by=y,suffix='_combined_ppfiltered')
 
     ##############################################
     # Compute and plot SHAP values against the F-ratio   #
