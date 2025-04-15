@@ -524,15 +524,16 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
   }
   
   multivariate_results <- multivariate_results %>%
-    filter(var %in% selected_vars)
+    filter(var %in% selected_vars) %>%
+    mutate(Label = ifelse(p.value <= pval_threshold, str_c(predictor, ' x ', outcome), ''))
 
   multivariate_plot <- ggplot(multivariate_results, aes(HR,-log10(p.value)))+
     geom_hline(yintercept=-log10(pval_threshold), linetype='dashed', alpha=0.5)+
     geom_point(aes(col=predictor, shape=outcome),alpha=0.75, size=3)+
     geom_errorbarh(aes(xmin=Lower_95CI_HR, xmax=Upper_95CI_HR,col=predictor, shape=outcome),alpha=0.75, height=0.2)+
     geom_vline(xintercept=1, linetype='dashed',alpha=0.5)+
-    # geom_text_repel(aes(label=HR))+
-    scale_colour_brewer(name='Predictor',palette='Dark2')+
+    geom_text_repel(aes(col=predictor,label=Label))+
+    scale_colour_brewer(name='Predictor',palette='Set1')+
     scale_shape_discrete(name='Outcome')+
     xlab(ifelse(pp_scaling == F, 'Hazard Ratio', 'Hazard Ratio per SD'))+
     ylab(ifelse(mtc=='Bonferroni','-log10 (Wald-test p value)', '-log10 (Adjusted Wald-test p value)'))+

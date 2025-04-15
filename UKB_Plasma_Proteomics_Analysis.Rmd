@@ -1234,7 +1234,7 @@ multivariate_cox_results <- multivariate_cox_results %>%
 saveRDS(multivariate_cox_results, str_c('OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instance,'/',extra_folders,'/allcmpp_mvCox_results_pp',pp_scaling, '.rds'))
 
 
-# multivariate_cox_results <- readRDS(str_c('OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instance,'/allcmpp_mvCox_results.rds'))
+# multivariate_cox_results <- readRDS(str_c('OUTPUT/UKB/PLOTS/5_CoxHCMDiag/',instance,'/',extra_folders,'/allcmpp_mvCox_results_pp',pp_scaling, '.rds'))
 ```
 
 ```{r}
@@ -1261,8 +1261,8 @@ multivariate_coxph_plotter <- function(multivariate_results, plot_output_path, o
   }
   
   multivariate_plot <- ggplot(multivariate_results, aes(HR,-log10(p.value), col=MTC_significant))+
-    geom_vline(xintercept=1, linetype='dashed',alpha=0.5)+
-    geom_hline(yintercept=-log10(pval_threshold), linetype='dashed', alpha=0.5)+
+    geom_vline(xintercept=1, linetype='dashed')+
+    geom_hline(yintercept=-log10(pval_threshold), linetype='dashed')+
     geom_point(alpha=0.75)+
     scale_colour_manual(name=ifelse(isFALSE(specific_label),'MTC Significant','PP of Interest'),values=c('FALSE'='grey','TRUE'='red'))+
     geom_text_repel(aes(label=Label), nudge_y=3, force = 5, max.overlaps=40)+
@@ -1635,12 +1635,12 @@ Note that `test.tsv` is just to shorten the filename to enable import.
 This evaluates multicollinearity via evaluation of all biomarker's pairwise correlation with NTproBNP (prior to transformation btw).
 
 ```{r}
-pp <- colnames(ukb_proteomics_data)[-1]
+pp <- colnames(pp_i0)[-1]
 
-pearson_pairwise_ntprobnp<- map(pp, ~cor(ukb_proteomics_data[[.]], ukb_proteomics_data$ntprobnp, use='pairwise.complete.obs')) 
-names(pearson_pairwise_ntprobnp) <- pp
+pairwise_ntprobnp<- map(pp, ~cor(pp_i0[[.]], pp_i0$ntprobnp, use='pairwise.complete.obs', method='spearman')) 
+names(pairwise_ntprobnp) <- pp
 
-pearson_pairwise_ntprobnp <- pearson_pairwise_ntprobnp %>%
+pairwise_ntprobnp <- pairwise_ntprobnp %>%
   bind_rows() %>%
   pivot_longer(everything(), names_to='pp', values_to='r')
 ```
