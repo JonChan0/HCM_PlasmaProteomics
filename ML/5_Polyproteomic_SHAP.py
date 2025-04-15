@@ -95,8 +95,8 @@ def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, col
     feature_importance = np.abs(shap_values.values).mean(0)
     top_indices = np.argsort(-feature_importance)[:top_n]  # Get indices of top features
 
-    # Create a figure with subplots
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    # Create a figure with subplots but make the dimensions of the figure depdendent on the top_n input
+    fig, axes = plt.subplots(nrows=(top_n + 1) // 2, ncols=2, figsize=(12, 6 * ((top_n + 1) // 2)), constrained_layout=True)
     axes = axes.flatten()  # Flatten for easier indexing
 
     # Plot each feature dependence plot in its own subplot
@@ -541,9 +541,9 @@ if __name__ == "__main__":
     plot_shap_plots(shap_values_combined_filtered, args.model_name, len(pp_names), args.plot_output_path, '_combined_ppfiltered')
 
     # Plot SHAP dependence plots for filtered features
-    dependence_shap_plotter(shap_values_cases_filtered, args.model_name, args.plot_output_path, top_n=5)
-    dependence_shap_plotter(shap_values_controls_filtered, args.model_name, args.plot_output_path, top_n=5)
-    dependence_shap_plotter(shap_values_combined_filtered, args.model_name, args.plot_output_path, top_n=5, color_by=y)
+    dependence_shap_plotter(shap_values_cases_filtered, args.model_name, args.plot_output_path, top_n=9)
+    dependence_shap_plotter(shap_values_controls_filtered, args.model_name, args.plot_output_path, top_n=9)
+    dependence_shap_plotter(shap_values_combined_filtered, args.model_name, args.plot_output_path, top_n=9, color_by=y)
 
     ##############################################
     # Compute and plot SHAP values against the F-ratio   #
