@@ -79,40 +79,49 @@ def plot_shap_plots(shap_values, model_name, n_features, output_folder, suffix='
     plt.savefig(os.path.join(output_folder, f"{model_name}_shap_beeswarm{suffix}.png"))
     plt.close()
 
-def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5):
+def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, color_by=None):
+    """
+    Plot SHAP dependence plots for the top_n features.
+    Optionally color points by a provided array (e.g., case/control status).
     
-    # Assuming shap_values is your SHAP explanation object
+    Parameters:
+    - shap_values: SHAP explanation object.
+    - model_name: Name of the model for plot titles and filenames.
+    - output_folder: Path to save the plots.
+    - top_n: Number of top features to plot.
+    - color_by: Array of values to color points by (e.g., case/control status).
+    """
     # Get feature importance
     feature_importance = np.abs(shap_values.values).mean(0)
-    top_indices = np.argsort(-feature_importance)[:top_n]  # Get indices of top 5 features
-    
-    # Create a figure with 5 subplots
+    top_indices = np.argsort(-feature_importance)[:top_n]  # Get indices of top features
+
+    # Create a figure with subplots
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     axes = axes.flatten()  # Flatten for easier indexing
-    
+
     # Plot each feature dependence plot in its own subplot
     for i, feature_idx in enumerate(top_indices):
         if i < len(axes):
             ax = axes[i]
             shap.plots.scatter(
                 shap_values[:, feature_idx],
-                #color=shap_values,
+                color=color_by if color_by is not None else None,
                 show=False,
                 ax=ax
             )
             ax.set_title(f'Feature: {shap_values.feature_names[feature_idx]}', fontsize=12)
-            ax.axhline(y=0,c='black',linestyle='--')
-    
-    # Hide the unused subplot if any
-    if len(top_indices) < len(axes):
-        axes[-1].set_visible(False)
-    
+            ax.axhline(y=0, c='black', linestyle='--')
+
+    # Hide unused subplots if any
+    for j in range(i + 1, len(axes)):
+        axes[j].set_visible(False)
+
     # Add an overall title to the figure
     fig.suptitle(f'SHAP Dependence Plots for Top {top_n} Features', fontsize=16, y=0.98)
     plt.savefig(os.path.join(output_folder, f'{model_name}_top{top_n}_dependence_plots.png'), dpi=300, bbox_inches='tight')
-    # plt.show()
+    plt.close()
 
-def shap_to_df(shap_values):
+def mean_shap_to_df(shap_values):
     # Calculate mean absolute SHAP value for each feature
     mean_abs_shap = np.abs(shap_values.values).mean(axis=0)
     
@@ -126,6 +135,211 @@ def shap_to_df(shap_values):
     feature_importance = feature_importance.sort_values('mean_abs_shap_value', ascending=False)
     
     return feature_importance
+
+from typing import List, Optional, Union, Any
+def save_precomputed_shap_values(
+    shap_values_data: Any, # Pre-computed SHAP values (Explanation obj, np.ndarray, or list)
+    feature_names: List[str], # List of feature names (now mandatory)
+    output_path: str, # Directory path to save the output files
+    model_name: str, # Descriptive name for the model, used in filenames
+    suffix: Optional[str] = None, # Optional suffix string for filenames
+    base_value: Optional[Union[float, np.ndarray, list]] = None, # Provide if not in shap_values_data or to override
+    instance_index: Optional[pd.Index] = None, # Optional: provide index for rows
+    positive_class_index: Optional[int] = 1 # For multi-output classification data
+):
+    """
+    Saves pre-computed SHAP values (and optionally base value) to TSV/TXT files.
+
+    Accepts SHAP values as a SHAP Explanation object, a NumPy array, or a list
+    of NumPy arrays (for multi-output).
+
+    Args:
+        shap_values_data: The pre-computed SHAP values. Can be:
+                          - A SHAP Explanation object (`explanation = explainer(X)`).
+                          - A NumPy array (n_instances, n_features) for single output.
+                          - A list of NumPy arrays [(n_instances, n_features)] for multi-output.
+        feature_names: A list of strings representing the feature names. The order
+                       must match the feature dimension of the SHAP values. Mandatory.
+        output_path: Directory path where the output files will be saved.
+                     The directory will be created if it doesn't exist.
+        model_name: Descriptive name for the model, used as the base for filenames.
+        suffix: An optional suffix string to append to the filenames before the
+                extension (e.g., '_test_set'). An underscore is added automatically.
+        base_value: The base value (or list/array for multi-output) corresponding
+                    to the SHAP values. If `shap_values_data` is an Explanation
+                    object, its `base_values` are used by default unless this argument
+                    is provided (override). If `shap_values_data` is array/list,
+                    this argument is the only way to save the base value.
+        instance_index: Optional Pandas Index object to use for the rows in the
+                        output TSV file. If None, no index is saved.
+        positive_class_index: Applicable if `shap_values_data` represents multi-output
+                               classification values (e.g., a list of arrays or a 3D array).
+                               Specifies the class index to extract and save.
+                               If None and multi-output is detected, raises ValueError.
+                               Ignored for single-output 2D arrays.
+
+    Raises:
+        ValueError: If dimensions mismatch, index mismatch, or required info is missing.
+        TypeError: If `shap_values_data` is an unexpected type.
+        RuntimeError: If SHAP values array cannot be processed.
+    """
+    print(f"Saving pre-computed SHAP values for: {model_name}{'_' + suffix if suffix else ''}")
+
+    # --- 1. Interpret Input & Extract Raw SHAP Values ---
+    shap_values_raw: Any
+    _base_value = base_value # Start with the provided base_value
+    _feature_names = feature_names # Use the mandatory feature_names
+
+    # Check if input is a SHAP Explanation object
+    is_explanation_obj = hasattr(shap_values_data, 'values') and \
+                         hasattr(shap_values_data, 'base_values')
+                         # We don't strictly need .feature_names here as it's mandatory arg
+
+    if is_explanation_obj:
+        print("Input detected as SHAP Explanation object.")
+        shap_values_raw = shap_values_data.values
+        if _base_value is None: # If user didn't override, use the object's base value
+            _base_value = shap_values_data.base_values
+            print("Using base_values found in Explanation object.")
+        else:
+            print("Using provided base_value (overriding Explanation object's base_values).")
+
+        # Sanity check feature names length if possible
+        if hasattr(shap_values_data, 'feature_names') and shap_values_data.feature_names is not None:
+            if len(shap_values_data.feature_names) != len(_feature_names):
+                print(f"Warning: Provided feature_names count ({len(_feature_names)}) differs from Explanation object's feature_names count ({len(shap_values_data.feature_names)}). Using provided list.")
+            # Potentially compare names if needed, but trust the mandatory argument for now.
+
+    elif isinstance(shap_values_data, (np.ndarray, list)):
+        print("Input detected as NumPy array or list.")
+        shap_values_raw = shap_values_data
+        if _base_value is None:
+            print("Warning: No base_value provided for raw SHAP input. Base value file will not be saved.")
+    else:
+        raise TypeError(f"Unsupported type for shap_values_data: {type(shap_values_data)}. Expected Explanation object, np.ndarray, or list.")
+
+    # --- 2. Handle Multi-Output Structure ---
+    shap_values_array: np.ndarray
+    n_instances = None # Track number of instances
+
+    # Determine if the raw values structure indicates multiple outputs
+    is_multi_output = isinstance(shap_values_raw, list) or \
+                      (isinstance(shap_values_raw, np.ndarray) and shap_values_raw.ndim > 2)
+
+    if is_multi_output:
+         # Try to determine number of outputs
+         if isinstance(shap_values_raw, list):
+             if not shap_values_raw: raise ValueError("Input SHAP values list is empty.")
+             num_outputs = len(shap_values_raw)
+         elif isinstance(shap_values_raw, np.ndarray):
+             # Guess output dim: often last for SHAP (n_inst, n_feat, n_out) or first (n_out, n_inst, n_feat)
+             # This is ambiguous without more context, we rely on positive_class_index slicing logic
+             # Let's just proceed and let slicing + validation handle it.
+             num_outputs = 'unknown (3D array)' # Placeholder
+
+         print(f"Multi-output SHAP values detected (structure suggests {num_outputs} outputs).")
+
+         if positive_class_index is None:
+             raise ValueError(f"Multi-output detected, but 'positive_class_index' is None. Please specify which class index to save.")
+         if not isinstance(positive_class_index, int) or positive_class_index < 0:
+              raise ValueError(f"'positive_class_index' ({positive_class_index}) must be a non-negative integer.")
+
+         print(f"Selecting SHAP values for class index: {positive_class_index}")
+         try:
+             if isinstance(shap_values_raw, list):
+                 if positive_class_index >= len(shap_values_raw):
+                      raise IndexError(f"positive_class_index {positive_class_index} out of bounds for list of length {len(shap_values_raw)}.")
+                 shap_values_array = shap_values_raw[positive_class_index]
+             else: # Assuming 3D numpy array
+                # Try common slicings, prioritize shape that matches feature count
+                if shap_values_raw.ndim == 3:
+                    if shap_values_raw.shape[1] == len(_feature_names): # Assume (n_instances, n_features, n_outputs)
+                        if positive_class_index >= shap_values_raw.shape[2]: raise IndexError("Index out of bounds for last dimension.")
+                        shap_values_array = shap_values_raw[:, :, positive_class_index]
+                    elif shap_values_raw.shape[2] == len(_feature_names): # Assume (n_instances, n_outputs, n_features)? Less common
+                        if positive_class_index >= shap_values_raw.shape[1]: raise IndexError("Index out of bounds for middle dimension.")
+                        shap_values_array = shap_values_raw[:, positive_class_index, :]
+                    elif shap_values_raw.shape[0] == len(_feature_names): # Assume (n_features, n_instances, n_outputs)? Very unlikely
+                        raise ValueError("Cannot reliably interpret 3D array shape {shap_values_raw.shape} with features as first dimension.")
+                    else: # Maybe (n_outputs, n_instances, n_features)?
+                        if positive_class_index >= shap_values_raw.shape[0]: raise IndexError("Index out of bounds for first dimension.")
+                        shap_values_array = shap_values_raw[positive_class_index, :, :]
+
+                else:
+                     raise ValueError(f"Cannot handle multi-output NumPy array with shape {shap_values_raw.shape}")
+
+         except IndexError as e:
+              raise ValueError(f"Could not slice multi-output SHAP data at index {positive_class_index}: {e}")
+
+         # Try to select the corresponding base value if _base_value is also multi-output
+         if _base_value is not None and hasattr(_base_value, '__len__') and not isinstance(_base_value, str):
+             try:
+                 # Check if index is valid for base value length
+                 if positive_class_index < len(_base_value):
+                     _base_value = _base_value[positive_class_index]
+                     print(f"Selected corresponding base value for class index {positive_class_index}.")
+                 else:
+                      print(f"Warning: positive_class_index {positive_class_index} is out of bounds for base_value length {len(_base_value)}. Keeping original base value.")
+             except (IndexError, TypeError): # Handle non-sliceable or index error
+                 print(f"Warning: Could not select base value for index {positive_class_index}. Keeping original base value.")
+         elif _base_value is not None:
+             print("Warning: SHAP values seem multi-output, but base value does not. Base value might be average.")
+
+    else:
+        # Assuming single output (should be a 2D NumPy array)
+        print("Assuming single-output SHAP values.")
+        if not isinstance(shap_values_raw, np.ndarray):
+             raise TypeError(f"Expected single-output SHAP values to be ndarray, but got {type(shap_values_raw)}")
+        if shap_values_raw.ndim != 2:
+            raise ValueError(f"Expected single-output SHAP values to be 2D (instances, features), but got shape {shap_values_raw.shape}.")
+        shap_values_array = shap_values_raw
+        # Base value might still be multi-output (e.g., one per class)
+        if _base_value is not None and hasattr(_base_value, '__len__') and not isinstance(_base_value, str) and len(_base_value) > 1:
+             print(f"Note: Base value has multiple ({len(_base_value)}) entries but SHAP values are single-output. Saving all base values.")
+
+    # --- 3. Final Validation ---
+    if not isinstance(shap_values_array, np.ndarray) or shap_values_array.ndim != 2:
+         raise RuntimeError(f"Failed to extract a 2D NumPy array for SHAP values. Got shape {getattr(shap_values_array, 'shape', 'N/A')}.")
+
+    n_instances = shap_values_array.shape[0]
+    n_features = shap_values_array.shape[1]
+
+    if n_features != len(_feature_names):
+         raise ValueError(f"Dimension mismatch: Final SHAP values feature count ({n_features}) != provided feature_names count ({len(_feature_names)}).")
+    if instance_index is not None and len(instance_index) != n_instances:
+         raise ValueError(f"Dimension mismatch: instance_index length ({len(instance_index)}) != SHAP values instance count ({n_instances}).")
+
+    # --- 4. Create DataFrame ---
+    print(f"Creating DataFrame ({n_instances} instances, {n_features} features)...")
+    shap_df = pd.DataFrame(shap_values_array, columns=_feature_names, index=instance_index)
+
+    # --- 5. Prepare Filenames & Save ---
+    os.makedirs(output_path, exist_ok=True) # Ensure directory exists
+
+    file_suffix_str = f"_{suffix}" if suffix else ""
+    shap_values_filename = os.path.join(output_path, f"{model_name}{file_suffix_str}_shap_values.tsv")
+    base_value_filename = os.path.join(output_path, f"{model_name}{file_suffix_str}_shap_base_value.txt")
+
+    # Save SHAP values DataFrame
+    print(f"Saving SHAP values to: {shap_values_filename}")
+    shap_df.to_csv(shap_values_filename, sep='\t', index=(instance_index is not None), float_format='%.8g') # Save index only if provided
+
+    # Save Base value
+    if _base_value is not None:
+        print(f"Saving base value(s) to: {base_value_filename}")
+        try:
+            with open(base_value_filename, 'w') as f:
+                # Handle array/list/single value cleanly
+                if hasattr(_base_value, '__iter__') and not isinstance(_base_value, str):
+                    f.write('\t'.join(map(lambda x: f"{x:.8g}", _base_value))) # Format numbers
+                else:
+                    f.write(f"{_base_value:.8g}") # Format single number
+        except Exception as e:
+            print(f"Warning: Could not save base value to {base_value_filename}: {e}")
+    else:
+        print("Base value was not available or not provided, skipping save.")
+
+    print(f"SHAP saving process complete for {model_name}{file_suffix_str}.")
 
 def plot_shap_vs_Fratio(mean_shap_df, fratio_df, model_name, output_folder, top_n_label=5):
     """Plot mean absolute SHAP-values vs F-ratio for the given model. It also labels the top 5 features for both SHAP and F ratio"""
@@ -270,93 +484,156 @@ if __name__ == "__main__":
     # Load the data
     print(f"Loading data from {args.X_train_preprocessed_path}")
     X = pd.read_csv(args.X_train_preprocessed_path)
+    y = pd.read_csv(args.y_train_path).values.ravel()
     print(f"Preprocessed training data loaded with shape: {X.shape}")
 
-    pp_names = pd.read_csv(args.pp_names_file).iloc[:,0].values
+    pp_names = pd.read_csv(args.pp_names_file).iloc[:, 0].values
 
     model = load_model(args.model_pkl_file)
     explainer = shap.Explainer(model.named_steps['classifier'])
-    shap_values = explainer(X)
+
+    # Separate cases and controls
+    cases = X[y == 1]
+    controls = X[y == 0]
+
+    # Compute SHAP values for cases and controls
+    print("Computing SHAP values for cases...")
+    shap_values_cases = explainer(cases)
+    print("Computing SHAP values for controls...")
+    shap_values_controls = explainer(controls)
 
     ##############################################
     # Compute and plot basic SHAP plots comparing features  #
     ##############################################
 
-    # Plot SHAP summary plot for all features in the model
-    if len(X.columns) <= 50: #Only plot all the features if the number of total features is <= 50
-        plot_shap_plots(shap_values, args.model_name, len(X.columns), args.plot_output_path)
-    plot_shap_plots(shap_values, args.model_name, 10, args.plot_output_path, '_top10') #Also plot only showing top 10 features
+    # Plot SHAP summary plots for both cases and controls combined
+    shap_values_combined = explainer(X)
 
-    #Plot SHAP plots for only filtered features i.e plasma proteins
+    if len(X.columns) <= 50:
+        plot_shap_plots(shap_values_combined, args.model_name, len(X.columns), args.plot_output_path, '_combined')
+    plot_shap_plots(shap_values_combined, args.model_name, 10, args.plot_output_path, '_combined_top10')
+
+    # Plot SHAP summary plots for cases only
+    if len(cases.columns) <= 50:
+        plot_shap_plots(shap_values_cases, args.model_name, len(cases.columns), args.plot_output_path, '_cases')
+    plot_shap_plots(shap_values_cases, args.model_name, 10, args.plot_output_path, '_cases_top10')
+
+    # Plot SHAP summary plots for controls only
+    if len(controls.columns) <= 50:
+        plot_shap_plots(shap_values_controls, args.model_name, len(controls.columns), args.plot_output_path, '_controls')
+    plot_shap_plots(shap_values_controls, args.model_name, 10, args.plot_output_path, '_controls_top10')
+
+    # Filter SHAP values for plasma proteins
     pp_names = pp_names[np.isin(pp_names, X.columns.values)]
     print(f'The filtered features include {pp_names}')
-    shap_values_filtered = filter_shap_values(shap_values, X.columns.values.tolist(), pp_names) #SHAP values for only the plasma proteins
+    shap_values_cases_filtered = filter_shap_values(shap_values_cases, X.columns.values.tolist(), pp_names)
+    shap_values_controls_filtered = filter_shap_values(shap_values_controls, X.columns.values.tolist(), pp_names)
+    shap_values_combined_filtered = filter_shap_values(shap_values_combined, X.columns.values.tolist(), pp_names)
 
-    if len(pp_names) <= 50: #Only plot all the features if the number of total features is <= 50
-        plot_shap_plots(shap_values_filtered, args.model_name, len(pp_names), args.plot_output_path, '_ppfiltered')
+    #Save the filtered SHAP value objects
+    save_precomputed_shap_values(shap_values_cases_filtered, pp_names, args.plot_output_path, args.model_name, suffix='_cases_ppfiltered')
+    save_precomputed_shap_values(shap_values_controls_filtered, pp_names, args.plot_output_path, args.model_name, suffix='_controls_ppfiltered')
+    save_precomputed_shap_values(shap_values_combined_filtered, pp_names, args.plot_output_path, args.model_name, suffix='_combined_ppfiltered')
 
-    plot_shap_plots(shap_values_filtered, args.model_name, 10, args.plot_output_path, '_ppfiltered_top10') #Also plot only showing top 10 plasma proteins
-    plot_shap_plots(shap_values_filtered, args.model_name, 30, args.plot_output_path, '_ppfiltered_top30') #Also plot only showing top 30 plasma proteins
+    #Also replot all the SHAP summary plots for the filtered features
+    plot_shap_plots(shap_values_cases_filtered, args.model_name, len(pp_names), args.plot_output_path, '_cases_ppfiltered')
+    plot_shap_plots(shap_values_controls_filtered, args.model_name, len(pp_names), args.plot_output_path, '_controls_ppfiltered')
+    plot_shap_plots(shap_values_combined_filtered, args.model_name, len(pp_names), args.plot_output_path, '_combined_ppfiltered')
 
-    #Plot the SHAP dependence plots for the top_n_features
-    dependence_shap_plotter(shap_values_filtered, args.model_name, args.plot_output_path, top_n=5)
+    # Plot SHAP dependence plots for filtered features
+    dependence_shap_plotter(shap_values_cases_filtered, args.model_name, args.plot_output_path, top_n=5)
+    dependence_shap_plotter(shap_values_controls_filtered, args.model_name, args.plot_output_path, top_n=5)
+    dependence_shap_plotter(shap_values_combined_filtered, args.model_name, args.plot_output_path, top_n=5, color_by=y)
 
     ##############################################
     # Compute and plot SHAP values against the F-ratio   #
     ##############################################
 
-    #Compute the F-ratio for the plasma proteins in the X_train data file given that X is a dataframe
-    fvalues = f_classif(X.loc[:,pp_names], pd.read_csv(args.y_train_path).values.ravel())[0]
+    # Compute F-ratio for plasma proteins
+    fvalues = f_classif(X.loc[:, pp_names], y)[0]
     fratio_df = pd.DataFrame({'Feature': pp_names, 'F-ratio': fvalues})
-    mean_shap_filtered_df = shap_to_df(shap_values_filtered)
-    mean_shap_filtered_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_mean_abs_shap_values.csv'), index=False)
 
-    plot_shap_vs_Fratio(mean_shap_filtered_df, fratio_df, args.model_name, args.plot_output_path)
+    # Compute mean SHAP values for cases and controls
+    mean_shap_cases_df = mean_shap_to_df(shap_values_cases_filtered)
+    mean_shap_controls_df = mean_shap_to_df(shap_values_controls_filtered)
+    mean_shap_combined_df = mean_shap_to_df(shap_values_combined)
+
+    # Save mean SHAP values
+    mean_shap_cases_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_mean_abs_shap_values_cases.csv'), index=False)
+    mean_shap_controls_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_mean_abs_shap_values_controls.csv'), index=False)
+    mean_shap_combined_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_mean_abs_shap_values_combined.csv'), index=False)
+
+    # Plot SHAP vs F-ratio for cases and controls
+    plot_shap_vs_Fratio(mean_shap_cases_df, fratio_df, f"{args.model_name}_cases", args.plot_output_path)
+    plot_shap_vs_Fratio(mean_shap_controls_df, fratio_df, f"{args.model_name}_controls", args.plot_output_path)
+    plot_shap_vs_Fratio(mean_shap_combined_df, fratio_df, f"{args.model_name}_combined", args.plot_output_path)
 
     ##############################################
     # Compute and plot SHAP interaction values   #
     ##############################################
-    print("Computing SHAP interaction values...")
-    # Compute interaction values for the entire dataset
-    shap_interaction_values = explainer.shap_interaction_values(X)
-    # Filter to plasma proteins only
-    shap_interaction_values_filtered = filter_shap_interaction_values(
-        shap_interaction_values, X.columns.values.tolist(), pp_names)
-    # Compute the mean absolute interaction values across samples
-    mean_interaction_filtered = np.abs(shap_interaction_values_filtered).mean(axis=0)
-    # Plot a heatmap for the plasma protein interaction effects
-    plot_shap_interaction_heatmap(mean_interaction_filtered, pp_names, args.model_name, args.plot_output_path, suffix='_ppfiltered')
-    print("SHAP interaction values computed and plotted.")
+
+    print("Computing SHAP interaction values for cases...")
+    shap_interaction_values_cases = explainer.shap_interaction_values(cases)
+    print("Computing SHAP interaction values for controls...")
+    shap_interaction_values_controls = explainer.shap_interaction_values(controls)
+
+    shap_interaction_values_combined = explainer.shap_interaction_values(X)
+
+    # Filter interaction values for plasma proteins
+    shap_interaction_values_cases_filtered = filter_shap_interaction_values(
+        shap_interaction_values_cases, X.columns.values.tolist(), pp_names)
+    shap_interaction_values_controls_filtered = filter_shap_interaction_values(
+        shap_interaction_values_controls, X.columns.values.tolist(), pp_names)
+    shap_interaction_values_combined_filtered = filter_shap_interaction_values(
+        shap_interaction_values_combined, X.columns.values.tolist(), pp_names 
+    )
+
+    # Compute mean absolute interaction values
+    mean_interaction_cases = np.abs(shap_interaction_values_cases_filtered).mean(axis=0)
+    mean_interaction_controls = np.abs(shap_interaction_values_controls_filtered).mean(axis=0)
+    mean_interaction_combined = np.abs(shap_interaction_values_combined_filtered).mean(axis=0)
+
+    # Plot heatmaps for interaction effects
+    plot_shap_interaction_heatmap(mean_interaction_cases, pp_names, f"{args.model_name}_cases", args.plot_output_path, suffix='_ppfiltered')
+    plot_shap_interaction_heatmap(mean_interaction_controls, pp_names, f"{args.model_name}_controls", args.plot_output_path, suffix='_ppfiltered')
+    plot_shap_interaction_heatmap(mean_interaction_combined, pp_names, f"{args.model_name}_combined", args.plot_output_path, suffix='_ppfiltered')
 
     ##############################################
     # Compute and plot SHAP bootstrap distributions for 95% confidence interval estimation of per-feature mean |SHAP|   #
     ##############################################
 
-    if args.bootstrap_or_not == 'no':
-        print("Bootstrapping not requested. Skipping bootstrapped SHAP values.")
-        exit(0)
-    elif args.bootstrap_or_not == 'yes':
-        # Compute the SHAP plots with bootstrapping of the X dataset to compute 95% confidence intervals for the SHAP values for each feature
-        # This is done by resampling the X dataset and computing the SHAP values for each bootstrap sample
-        # and then taking the mean and 95% confidence intervals for each feature
-        print("Computing bootstrapped SHAP values...")
-        mean_vals, lower_bound, upper_bound, feature_names = bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05)
-        #Save these values to a csv file
-        bootstrap_shap_df = pd.DataFrame({'Feature': feature_names, 'Mean SHAP': mean_vals, 'Lower Bound': lower_bound, 'Upper Bound': upper_bound})
-        bootstrap_shap_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values.csv'), index=False)
-        print(f"Bootstrapped SHAP values saved to {os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values.csv')}")
-        print("Bootstrapped SHAP values computed.")
+    if args.bootstrap_or_not == 'yes':
+        print("Computing bootstrapped SHAP values for cases...")
+        mean_vals_cases, lower_bound_cases, upper_bound_cases, feature_names_cases = bootstrap_shap_from_X(cases, model, n_iterations=1000, alpha=0.05)
+        print("Computing bootstrapped SHAP values for controls...")
+        mean_vals_controls, lower_bound_controls, upper_bound_controls, feature_names_controls = bootstrap_shap_from_X(controls, model, n_iterations=1000, alpha=0.05)
+        print('Computing bootstrapped SHAP values for combined...')
+        mean_vals_combined, lower_bound_combined, upper_bound_combined, feature_names_combined = bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05)
 
-        plot_bootstrap_shap(mean_vals, lower_bound, upper_bound, feature_names,  len(feature_names),args.model_name, args.plot_output_path)
+        # Save bootstrapped SHAP values
+        bootstrap_shap_cases_df = pd.DataFrame({'Feature': feature_names_cases, 'Mean SHAP': mean_vals_cases, 'Lower Bound': lower_bound_cases, 'Upper Bound': upper_bound_cases})
+        bootstrap_shap_controls_df = pd.DataFrame({'Feature': feature_names_controls, 'Mean SHAP': mean_vals_controls, 'Lower Bound': lower_bound_controls, 'Upper Bound': upper_bound_controls})
+        bootstrap_shap_combined_df = pd.DataFrame({'Feature': feature_names_combined, 'Mean SHAP': mean_vals_combined, 'Lower Bound': lower_bound_combined, 'Upper Bound': upper_bound_combined})
 
-        #Filter these values to only include the plasma proteins
-        feature_names_filtered = np.array(feature_names)[np.isin(feature_names, pp_names)]
-        mean_vals_filtered = mean_vals[np.isin(feature_names, pp_names)]
-        lower_bound_filtered = lower_bound[np.isin(feature_names, pp_names)]
-        upper_bound_filtered = upper_bound[np.isin(feature_names, pp_names)]
+        bootstrap_shap_cases_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_cases.csv'), index=False)
+        bootstrap_shap_controls_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_controls.csv'), index=False)
+        bootstrap_shap_combined_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_combined.csv'), index=False)
+
+        # Plot bootstrapped SHAP values
+        plot_bootstrap_shap(mean_vals_cases, lower_bound_cases, upper_bound_cases, feature_names_cases, len(feature_names_cases), f"{args.model_name}_cases", args.plot_output_path)
+        plot_bootstrap_shap(mean_vals_controls, lower_bound_controls, upper_bound_controls, feature_names_controls, len(feature_names_controls), f"{args.model_name}_controls", args.plot_output_path)
+        plot_bootstrap_shap(mean_vals_combined, lower_bound_combined, lower_bound_combined, feature_names_combined, len(feature_names_combined), f"{args.model_name}_combined", args.plot_output_path)
+
+        #For each of the cases, controls and combined, filter the bootstrapped SHAP values to only include the plasma proteins
+        feature_names_cases_filtered = np.array(feature_names_cases)[np.isin(feature_names_cases, pp_names)]
+        feature_names_controls_filtered= np.array(feature_names_controls)[np.isin(feature_names_controls, pp_names)]
+        feature_names_combined_filtered = np.array(feature_names_combined)[np.isin(feature_names_combined, pp_names)]
 
         # Plot the bootstrapped SHAP values with confidence intervals
-        plot_bootstrap_shap(mean_vals_filtered, lower_bound_filtered, upper_bound_filtered, feature_names_filtered,  len(feature_names_filtered),args.model_name, args.plot_output_path, suffix='ppfiltered')
-
-
+        plot_bootstrap_shap(mean_vals_cases[np.isin(feature_names_cases, pp_names)], lower_bound_cases[np.isin(feature_names_cases, pp_names)], upper_bound_cases[np.isin(feature_names_cases, pp_names)], 
+                            feature_names_cases_filtered, len(feature_names_cases_filtered), f"{args.model_name}_cases", args.plot_output_path, suffix='ppfiltered')
+        plot_bootstrap_shap(mean_vals_controls[np.isin(feature_names_controls, pp_names)], lower_bound_controls[np.isin(feature_names_controls, pp_names)], upper_bound_controls[np.isin(feature_names_controls, pp_names)],
+                            feature_names_controls[np.isin(feature_names_controls, pp_names)], len(feature_names_controls[np.isin(feature_names_controls, pp_names)]), f"{args.model_name}_controls", args.plot_output_path, suffix='ppfiltered')
+        plot_bootstrap_shap(mean_vals_combined[np.isin(feature_names_combined, pp_names)], lower_bound_combined[np.isin(feature_names_combined, pp_names)], upper_bound_combined[np.isin(feature_names_combined, pp_names)],
+                            feature_names_combined[np.isin(feature_names_combined, pp_names)], len(feature_names_combined[np.isin(feature_names_combined, pp_names)]), f"{args.model_name}_combined", args.plot_output_path, suffix='ppfiltered')
 

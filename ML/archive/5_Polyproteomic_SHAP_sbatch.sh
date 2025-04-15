@@ -22,4 +22,5 @@ python 5_Polyproteomic_SHAP.py \
     --X_train_preprocessed_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train_preprocessed_"$model_name".csv \
     --y_train_path ../OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/y_all.csv \
     --plot_output_path ../OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap \
-    --pp_names_file=../DATA/UKB/ML/2_covariates_pp/ML_pp_names.csv 
+    --pp_names_file=../DATA/UKB/ML/2_covariates_pp/ML_pp_names.csv \
+    --bootstrap_or_not='yes'
