@@ -732,6 +732,10 @@ if __name__ == "__main__":
         shap_interaction_values_combined, X.columns.values.tolist(), pp_names 
     )
 
+    save_precomputed_shap_values(shap_interaction_values_cases_filtered, pp_names, args.plot_output_path, args.model_name, suffix='interaction_cases_ppfiltered')
+    save_precomputed_shap_values(shap_interaction_values_controls_filtered, pp_names, args.plot_output_path, args.model_name, suffix='interaction_controls_ppfiltered')
+    save_precomputed_shap_values(shap_interaction_values_combined_filtered, pp_names, args.plot_output_path, args.model_name, suffix='interaction_combined_ppfiltered')
+
     # Compute mean absolute interaction values
     mean_interaction_cases = np.abs(shap_interaction_values_cases_filtered).mean(axis=0)
     mean_interaction_controls = np.abs(shap_interaction_values_controls_filtered).mean(axis=0)
