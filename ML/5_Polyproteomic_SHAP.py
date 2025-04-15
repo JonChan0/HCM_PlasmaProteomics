@@ -96,7 +96,7 @@ def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, col
     top_indices = np.argsort(-feature_importance)[:top_n]  # Get indices of top features
 
     # Create a figure with subplots but make the dimensions of the figure depdendent on the top_n input
-    fig, axes = plt.subplots(nrows=(top_n + 1) // 3, ncols=3, figsize=(12, 6 * ((top_n + 1) // 3)))
+    fig, axes = plt.subplots(nrows=(top_n + 1) // 3, ncols=3, figsize=(18, 6 * ((top_n + 1) // 3)))
     axes = axes.flatten()  # Flatten for easier indexing
 
     # Plot each feature dependence plot in its own subplot
