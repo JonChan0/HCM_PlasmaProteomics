@@ -134,17 +134,18 @@ sig_mr_results_or <- sig_mr_results_or %>%
 
 sig_mr_results_or <- sig_mr_results_or %>%
   mutate(outcome_plot_group = ifelse(outcome %in% c('HCM'), 'OR', 'beta')) %>%
-  mutate(exposure_outcome=factor(exposure_outcome))
+  mutate(exposure_outcome=factor(exposure_outcome)) %>%
+  mutate(transformed_b = b*log(2)) #This transforms the causal estimate to increase in outcome per doubling of genetically predicted liability
 
 forest_plot1 <- ggplot(sig_mr_results_or)+
-  geom_point(aes(x=b, y= exposure_outcome, col=dataset))+
-  geom_errorbar(aes(xmin=lo_ci, xmax=up_ci, y=exposure_outcome,col=dataset))+
+  geom_point(aes(x=transformed_b, y= exposure_outcome, col=dataset))+
+  geom_errorbar(aes(xmin=lo_ci * log(2), xmax=up_ci * log(2), y=exposure_outcome,col=dataset))+
   geom_vline(xintercept=0, col='black', linetype='dashed')+
-  xlab('Change in Continuous Outcome (SD) per Log-Odds (HCM) Exposure')+
+  xlab('Change in Continuous Outcome (SD) per Doubling of Genetic Liability to HCM')+
   ylab('Exposure -> Outcome')+
   labs(col='Dataset')
 
 print(forest_plot1)
-ggsave(str_c(results_folder,'sig_MR_forestplot.png'),forest_plot1, dpi=600, width=9, height=4.5)
+ggsave(str_c(results_folder,'sig_MR_forestplot.png'),forest_plot1, dpi=600, width=9, height=3)
 ```
 
