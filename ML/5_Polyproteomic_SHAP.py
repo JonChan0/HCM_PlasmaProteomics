@@ -16,6 +16,7 @@ import sklearn
 from adjustText import adjust_text
 from sklearn.feature_selection import f_classif
 from sklearn.utils import resample
+import matplotlib.gridspec as gridspec # Needed for custom subplot layout
 
 sklearn.set_config(transform_output="pandas")
 
@@ -79,47 +80,190 @@ def plot_shap_plots(shap_values, model_name, n_features, output_folder, suffix='
     plt.savefig(os.path.join(output_folder, f"{model_name}_shap_beeswarm{suffix}.png"))
     plt.close()
 
-def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, color_by=None, suffix=''):
+def dependence_shap_plotter(shap_values, model_name, output_folder, top_n=5, color_by=None, suffix='', alpha_majority=0.1, marker_size=10):
     """
     Plot SHAP dependence plots for the top_n features.
-    Optionally color points by a provided array (e.g., case/control status).
-    
+    Mitigates overplotting for imbalanced binary color_by arrays by making the majority class transparent.
+    Includes a marginal histogram of feature values when color_by is specified.
+
     Parameters:
-    - shap_values: SHAP explanation object.
+    - shap_values: SHAP explanation object (e.g., shap.Explanation).
+                   Requires shap_values.data, shap_values.values, shap_values.feature_names.
     - model_name: Name of the model for plot titles and filenames.
     - output_folder: Path to save the plots.
     - top_n: Number of top features to plot.
-    - color_by: Array of values to color points by (e.g., case/control status).
+    - color_by: 1D numpy array of binary values (0 or 1) to color points by.
+                Assumes 0 is the majority class ('Controls') and 1 is the minority class ('Cases').
+                If None, uses default SHAP interaction coloring and histogram.
+    - suffix: Optional string to append to the output filename.
+    - alpha_majority: Alpha transparency for the 'Controls' class (label 0). Default 0.1.
+                      Adjust based on imbalance ratio.
+    - marker_size: Size of the scatter plot markers. Default 10.
     """
-    # Get feature importance
-    feature_importance = np.abs(shap_values.values).mean(0)
-    top_indices = np.argsort(-feature_importance)[:top_n]  # Get indices of top features
+    # Ensure output folder exists
+    os.makedirs(output_folder, exist_ok=True)
 
-    # Create a figure with subplots but make the dimensions of the figure depdendent on the top_n input
-    fig, axes = plt.subplots(nrows=(top_n + 1) // 3, ncols=3, figsize=(18, 6 * ((top_n + 1) // 3)))
-    axes = axes.flatten()  # Flatten for easier indexing
+    # --- Data Extraction and Validation ---
+    if isinstance(shap_values, shap.Explanation):
+        shap_vals_arr = shap_values.values
+        feature_names = shap_values.feature_names
+        base_data = shap_values.data # This is the original feature data
+    else:
+        raise TypeError("Expected shap_values to be a shap.Explanation object containing .values, .data, and .feature_names")
 
-    # Plot each feature dependence plot in its own subplot
+    if feature_names is None:
+         raise ValueError("shap_values object must have feature_names attribute.")
+    if base_data is None:
+         raise ValueError("shap_values object must have data attribute (original features).")
+
+    # --- Feature Importance and Selection ---
+    feature_importance = np.abs(shap_vals_arr).mean(0)
+    # Ensure top_n does not exceed the number of features
+    actual_top_n = min(top_n, len(feature_names))
+    if actual_top_n < top_n:
+        print(f"Warning: Requested top_n={top_n}, but only {len(feature_names)} features available. Plotting top {actual_top_n}.")
+    top_indices = np.argsort(-feature_importance)[:actual_top_n] # Get indices of top features
+
+    # --- Plotting Setup ---
+    ncols = 3
+    nrows = (actual_top_n + ncols - 1) // ncols # Calculate rows needed
+    fig = plt.figure(figsize=(18, 6 * nrows)) # Create figure directly
+    # Define the outer GridSpec for the entire figure
+    outer_grid = gridspec.GridSpec(nrows, ncols, figure=fig)
+
+    plot_index = 0 # Keep track of which subplot position we are using
+
+    # --- Plotting Loop ---
     for i, feature_idx in enumerate(top_indices):
-        if i < len(axes):
-            ax = axes[i]
+        # Get the SubplotSpec for the current plot's cell in the outer grid
+        subplot_spec = outer_grid[plot_index]
+
+        feature_name = feature_names[feature_idx]
+
+        # Get SHAP values and feature values for the current feature
+        current_shap_values = shap_vals_arr[:, feature_idx]
+
+        # Extract corresponding feature values from base_data
+        if isinstance(base_data, pd.DataFrame):
+             if feature_name not in base_data.columns:
+                 raise ValueError(f"Feature '{feature_name}' not found in base_data columns.")
+             current_feature_values = base_data[feature_name].values
+        elif isinstance(base_data, np.ndarray):
+             if feature_idx >= base_data.shape[1]:
+                  raise IndexError(f"feature_idx {feature_idx} out of bounds for base_data with shape {base_data.shape}")
+             current_feature_values = base_data[:, feature_idx]
+        else:
+             raise TypeError(f"Unsupported type for base_data: {type(base_data)}. Expected pandas DataFrame or NumPy array.")
+
+        # --- Conditional Plotting ---
+        if color_by is not None:
+            # --- Manual Plotting with Histogram (color_by provided) ---
+
+            # Create a nested GridSpec *within* the current subplot cell
+            # 2 rows, 1 column. Scatter plot taller than histogram.
+            nested_gs = gridspec.GridSpecFromSubplotSpec(
+                2, 1, subplot_spec=subplot_spec, height_ratios=[4, 1], hspace=0.05
+            )
+
+            # Add subplots using the nested GridSpec indices
+            ax_scatter = fig.add_subplot(nested_gs[0]) # Axes for scatter plot (top row)
+            ax_hist = fig.add_subplot(nested_gs[1], sharex=ax_scatter) # Axes for histogram (bottom row)
+
+            # Validate color_by array
+            if not isinstance(color_by, np.ndarray):
+                try:
+                    color_by = np.array(color_by)
+                except Exception as e:
+                     raise TypeError(f"color_by must be convertible to a numpy array. Error: {e}")
+
+            if color_by.ndim != 1 or len(color_by) != len(current_shap_values):
+                raise ValueError(f"color_by must be a 1D array with the same length as the number of samples ({len(current_shap_values)}). Found shape {color_by.shape}")
+
+            unique_labels = np.unique(color_by)
+            if not np.all(np.isin(unique_labels, [0, 1])):
+               print(f"Warning: color_by contains labels other than 0 and 1 ({unique_labels}). Plotting may not be as intended.")
+
+            # Identify indices for Controls (0) and Cases (1)
+            idx_controls = np.where(color_by == 0)[0]
+            idx_cases = np.where(color_by == 1)[0]
+
+            # Plot Controls points first with transparency
+            ax_scatter.scatter(current_feature_values[idx_controls],
+                       current_shap_values[idx_controls],
+                       color='blue', # Or choose another color
+                       alpha=alpha_majority,
+                       s=marker_size,
+                       label='Controls', # Updated label
+                       rasterized=True)
+
+            # Plot Cases points second, fully opaque
+            ax_scatter.scatter(current_feature_values[idx_cases],
+                       current_shap_values[idx_cases],
+                       color='red', # Or choose another color
+                       alpha=1.0,
+                       s=marker_size,
+                       label='Cases', # Updated label
+                       rasterized=True)
+
+            ax_scatter.legend() # Add legend to distinguish classes
+
+            # --- Scatter Plot Styling ---
+            ax_scatter.set_title(f'Feature: {feature_name}', fontsize=12)
+            ax_scatter.set_ylabel(f'SHAP value for {feature_name}')
+            ax_scatter.axhline(y=0, color='black', linestyle='--', linewidth=0.5)
+            # Hide x-axis labels and ticks on the scatter plot
+            plt.setp(ax_scatter.get_xticklabels(), visible=False)
+            ax_scatter.tick_params(axis='x', which='both', length=0) # Hide x-ticks
+
+
+            # --- Histogram Plotting ---
+            # Plot histogram of the feature values on the bottom axes
+            ax_hist.hist(current_feature_values, bins=50, color='lightgray', density=True, align='mid')
+
+            # --- Histogram Styling ---
+            ax_hist.set_xlabel(f'{feature_name} Value')
+            # Make histogram less visually intrusive
+            ax_hist.set_yticks([])
+            ax_hist.set_yticklabels([])
+            ax_hist.spines['top'].set_visible(False)
+            ax_hist.spines['right'].set_visible(False)
+            ax_hist.spines['left'].set_visible(False)
+            ax_hist.tick_params(axis='x', direction='in') # Ticks inside
+
+            # hspace is now set in GridSpecFromSubplotSpec
+
+        else:
+            # --- Default SHAP Plotting (color_by is None) ---
+            # Use the standard shap plot which includes interaction coloring and histogram
+            # Create a single axes occupying the whole subplot cell
+            ax = fig.add_subplot(subplot_spec)
+
+            # Construct the Explanation object slice needed by shap.plots.scatter
+            shap_values_slice = shap_values[:, feature_idx]
+
             shap.plots.scatter(
-                shap_values[:, feature_idx],
-                color=color_by if color_by is not None else None,
+                shap_values_slice, # Pass the explanation slice for this feature
+                color=None, # Let SHAP choose interaction feature
                 show=False,
                 ax=ax
             )
-            ax.set_title(f'Feature: {shap_values.feature_names[feature_idx]}', fontsize=12)
-            ax.axhline(y=0, c='black', linestyle='--')
+            # Standard plot already includes title, labels, line, and histogram
 
-    # Hide unused subplots if any
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
+        plot_index += 1 # Move to the next subplot position
 
+    # --- Final Figure Adjustments ---
     # Add an overall title to the figure
-    fig.suptitle(f'SHAP Dependence Plots for Top {top_n} Features', fontsize=16, y=0.98)
-    plt.savefig(os.path.join(output_folder, f'{model_name}_top{top_n}_dependence_plots{suffix}.png'), dpi=300, bbox_inches='tight')
-    plt.close()
+    fig.suptitle(f'SHAP Dependence Plots for Top {actual_top_n} Features ({model_name})', fontsize=16, y=1.0)
+    # Adjust layout - use tight_layout first, then potentially refine with subplots_adjust
+    # Use wspace and hspace in the outer_grid definition if needed, or subplots_adjust
+    outer_grid.tight_layout(fig, rect=[0, 0.03, 1, 0.97]) # Apply tight_layout to the grid
+
+    # Save the figure
+    output_filename = os.path.join(output_folder, f'{model_name}_top{actual_top_n}_dependence_plots{suffix}.png')
+    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+    print(f"Saved dependence plots to {output_filename}")
+    plt.close(fig) # Close the figure to free memory
+
 
 def mean_shap_to_df(shap_values):
     # Calculate mean absolute SHAP value for each feature
