@@ -753,35 +753,33 @@ if __name__ == "__main__":
     if args.bootstrap_or_not == 'yes':
         print("Computing bootstrapped SHAP values for cases...")
         mean_vals_cases, lower_bound_cases, upper_bound_cases, feature_names_cases = bootstrap_shap_from_X(cases, model, n_iterations=1000, alpha=0.05)
-        print("Computing bootstrapped SHAP values for controls...")
-        mean_vals_controls, lower_bound_controls, upper_bound_controls, feature_names_controls = bootstrap_shap_from_X(controls, model, n_iterations=1000, alpha=0.05)
-        print('Computing bootstrapped SHAP values for combined...')
-        mean_vals_combined, lower_bound_combined, upper_bound_combined, feature_names_combined = bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05)
-
-        # Save bootstrapped SHAP values
         bootstrap_shap_cases_df = pd.DataFrame({'Feature': feature_names_cases, 'Mean SHAP': mean_vals_cases, 'Lower Bound': lower_bound_cases, 'Upper Bound': upper_bound_cases})
-        bootstrap_shap_controls_df = pd.DataFrame({'Feature': feature_names_controls, 'Mean SHAP': mean_vals_controls, 'Lower Bound': lower_bound_controls, 'Upper Bound': upper_bound_controls})
-        bootstrap_shap_combined_df = pd.DataFrame({'Feature': feature_names_combined, 'Mean SHAP': mean_vals_combined, 'Lower Bound': lower_bound_combined, 'Upper Bound': upper_bound_combined})
-
         bootstrap_shap_cases_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_cases.csv'), index=False)
-        bootstrap_shap_controls_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_controls.csv'), index=False)
-        bootstrap_shap_combined_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_combined.csv'), index=False)
-
-        # Plot bootstrapped SHAP values
         plot_bootstrap_shap(mean_vals_cases, lower_bound_cases, upper_bound_cases, feature_names_cases, len(feature_names_cases), f"{args.model_name}_cases", args.plot_output_path)
-        plot_bootstrap_shap(mean_vals_controls, lower_bound_controls, upper_bound_controls, feature_names_controls, len(feature_names_controls), f"{args.model_name}_controls", args.plot_output_path)
-        plot_bootstrap_shap(mean_vals_combined, lower_bound_combined, lower_bound_combined, feature_names_combined, len(feature_names_combined), f"{args.model_name}_combined", args.plot_output_path)
-
-        #For each of the cases, controls and combined, filter the bootstrapped SHAP values to only include the plasma proteins
         feature_names_cases_filtered = np.array(feature_names_cases)[np.isin(feature_names_cases, pp_names)]
-        feature_names_controls_filtered= np.array(feature_names_controls)[np.isin(feature_names_controls, pp_names)]
-        feature_names_combined_filtered = np.array(feature_names_combined)[np.isin(feature_names_combined, pp_names)]
-
-        # Plot the bootstrapped SHAP values with confidence intervals
         plot_bootstrap_shap(mean_vals_cases[np.isin(feature_names_cases, pp_names)], lower_bound_cases[np.isin(feature_names_cases, pp_names)], upper_bound_cases[np.isin(feature_names_cases, pp_names)], 
                             feature_names_cases_filtered, len(feature_names_cases_filtered), f"{args.model_name}_cases", args.plot_output_path, suffix='ppfiltered')
+
+        print("Computing bootstrapped SHAP values for controls...")
+        mean_vals_controls, lower_bound_controls, upper_bound_controls, feature_names_controls = bootstrap_shap_from_X(controls, model, n_iterations=1000, alpha=0.05)
+        bootstrap_shap_controls_df = pd.DataFrame({'Feature': feature_names_controls, 'Mean SHAP': mean_vals_controls, 'Lower Bound': lower_bound_controls, 'Upper Bound': upper_bound_controls})
+        bootstrap_shap_controls_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_controls.csv'), index=False)
+        plot_bootstrap_shap(mean_vals_controls, lower_bound_controls, upper_bound_controls, feature_names_controls, len(feature_names_controls), f"{args.model_name}_controls", args.plot_output_path)
+        feature_names_controls_filtered= np.array(feature_names_controls)[np.isin(feature_names_controls, pp_names)]
         plot_bootstrap_shap(mean_vals_controls[np.isin(feature_names_controls, pp_names)], lower_bound_controls[np.isin(feature_names_controls, pp_names)], upper_bound_controls[np.isin(feature_names_controls, pp_names)],
                             feature_names_controls[np.isin(feature_names_controls, pp_names)], len(feature_names_controls[np.isin(feature_names_controls, pp_names)]), f"{args.model_name}_controls", args.plot_output_path, suffix='ppfiltered')
+
+
+        print('Computing bootstrapped SHAP values for combined...')
+        mean_vals_combined, lower_bound_combined, upper_bound_combined, feature_names_combined = bootstrap_shap_from_X(X, model, n_iterations=1000, alpha=0.05)
+        # Save bootstrapped SHAP values
+        bootstrap_shap_combined_df = pd.DataFrame({'Feature': feature_names_combined, 'Mean SHAP': mean_vals_combined, 'Lower Bound': lower_bound_combined, 'Upper Bound': upper_bound_combined})
+        bootstrap_shap_combined_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_combined.csv'), index=False)
+        # Plot bootstrapped SHAP values
+        plot_bootstrap_shap(mean_vals_combined, lower_bound_combined, lower_bound_combined, feature_names_combined, len(feature_names_combined), f"{args.model_name}_combined", args.plot_output_path)
+        #For each of the cases, controls and combined, filter the bootstrapped SHAP values to only include the plasma proteins
+        feature_names_combined_filtered = np.array(feature_names_combined)[np.isin(feature_names_combined, pp_names)]
+        # Plot the bootstrapped SHAP values with confidence intervals
         plot_bootstrap_shap(mean_vals_combined[np.isin(feature_names_combined, pp_names)], lower_bound_combined[np.isin(feature_names_combined, pp_names)], upper_bound_combined[np.isin(feature_names_combined, pp_names)],
                             feature_names_combined[np.isin(feature_names_combined, pp_names)], len(feature_names_combined[np.isin(feature_names_combined, pp_names)]), f"{args.model_name}_combined", args.plot_output_path, suffix='ppfiltered')
 
