@@ -766,8 +766,8 @@ if __name__ == "__main__":
         bootstrap_shap_controls_df.to_csv(os.path.join(args.plot_output_path, f'{args.model_name}_bootstrapped_shap_values_controls.csv'), index=False)
         plot_bootstrap_shap(mean_vals_controls, lower_bound_controls, upper_bound_controls, feature_names_controls, len(feature_names_controls), f"{args.model_name}_controls", args.plot_output_path)
         feature_names_controls_filtered= np.array(feature_names_controls)[np.isin(feature_names_controls, pp_names)]
-        plot_bootstrap_shap(mean_vals_controls[np.isin(feature_names_controls, pp_names)], lower_bound_controls[np.isin(feature_names_controls, pp_names)], upper_bound_controls[np.isin(feature_names_controls, pp_names)],
-                            feature_names_controls[np.isin(feature_names_controls, pp_names)], len(feature_names_controls[np.isin(feature_names_controls, pp_names)]), f"{args.model_name}_controls", args.plot_output_path, suffix='ppfiltered')
+        plot_bootstrap_shap(mean_vals_controls[np.isin(feature_names_controls, pp_names)], lower_bound_controls[np.isin(feature_names_controls, pp_names)], upper_bound_controls[np.isin(feature_names_controls, pp_names)], 
+                    feature_names_controls_filtered, len(feature_names_controls_filtered), f"{args.model_name}_controls", args.plot_output_path, suffix='ppfiltered')
 
 
         print('Computing bootstrapped SHAP values for combined...')
@@ -781,5 +781,5 @@ if __name__ == "__main__":
         feature_names_combined_filtered = np.array(feature_names_combined)[np.isin(feature_names_combined, pp_names)]
         # Plot the bootstrapped SHAP values with confidence intervals
         plot_bootstrap_shap(mean_vals_combined[np.isin(feature_names_combined, pp_names)], lower_bound_combined[np.isin(feature_names_combined, pp_names)], upper_bound_combined[np.isin(feature_names_combined, pp_names)],
-                            feature_names_combined[np.isin(feature_names_combined, pp_names)], len(feature_names_combined[np.isin(feature_names_combined, pp_names)]), f"{args.model_name}_combined", args.plot_output_path, suffix='ppfiltered')
+                            feature_names_combined_filtered, len(feature_names_combined_filtered), f"{args.model_name}_combined", args.plot_output_path, suffix='ppfiltered')
 
