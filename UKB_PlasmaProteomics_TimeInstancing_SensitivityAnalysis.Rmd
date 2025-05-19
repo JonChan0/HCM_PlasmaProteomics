@@ -58,7 +58,7 @@ hcm_case_instance_calculator <- function(input_tb, output_name, threshold_date='
 overall_tb_builder <- function( ukb_cases, #HCM cases in UKB from the particular instance
                                 hcm_instance, #Name of the instance
                                 ukb_pp_list, #List of plasma proteins to compare
-                                ukb_basic_cov_filepath='DATA/UKB/PROCESSED/20240209_ukb_age_sex_htwt_10pcs_dbp_t2d_smoking_cov.tsv',  
+                              ukb_basic_cov_filepath='DATA/UKB/PROCESSED/20240209_ukb_age_sex_htwt_10pcs_dbp_t2d_smoking_cov.tsv',  
                                 ukb_rcmm_cov_filepath='DATA/UKB/PROCESSED/20240209_ukb_rcmm_cov.tsv',
                                 ukb_pp_filepath='DATA/UKB/RAP/PP/ukb_allpp_i0.tsv', 
                                 include_nonCM_panels=T, rcmm_cov=T){
@@ -260,7 +260,8 @@ main <- function(lagtime,  #Lagtime to test in years
                   pp_scaling='ranknorm',
                   rcmm_cov=T,
                   include_nonCM_panels=T,
-                  cc_output_basepath = 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/'){
+                  cc_output_basepath = 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/',
+                  limma_run=T){
   
   hcm_cases <- hcm_case_instance_calculator(hcm_diag_tb, 'HCM', lagtime=lagtime)
   
@@ -270,7 +271,7 @@ main <- function(lagtime,  #Lagtime to test in years
                                 ukb_basic_cov_filepath,  
                                 ukb_rcmm_cov_filepath,
                                 ukb_pp_filepath, 
-                                pp_scaling,include_nonCM_panels, rcmm_cov)
+                                include_nonCM_panels, rcmm_cov)
   
   pp <- ukb_pp_list$ukb_fieldname_equivalent[ukb_pp_list$ukb_fieldname_equivalent %in% colnames(ukb_pp_cov_hcm)] %>%  #In case any PP are removed due to lack of non-NA values
   unique()
@@ -286,6 +287,7 @@ main <- function(lagtime,  #Lagtime to test in years
   
   print(str_c('At lagtime ', lagtime, 'Y, number of HCM cases (incl. those with HF) = ', sum(cc_tb$hcm==T), ' and non-HCM/HF controls = ', sum(cc_tb$hcm==F)))
   
+
   if (isTRUE(rcmm_cov)){  #If using the extended covariate list suggested by Rob Clarke and Mohsen
     extra_folders <- 'rcmm_cov/'
     covars <- c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','t2d','smoking','Townsend','eGFR', 'ldl')
@@ -297,24 +299,69 @@ main <- function(lagtime,  #Lagtime to test in years
   path <- str_c(cc_output_basepath,'/HCM/', extra_folders) #Define the folder for output of plots and tabular data
   if(!dir.exists(path)){dir.create(path, recursive=T)}
   
-  limma_hcm <- map(pp, ~limma_dpe(cc_tb,., covar=covars)) %>% bind_rows()
-  
-  limma_hcm <- left_join(limma_hcm, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent')) %>% unique()
-  write_tsv(limma_hcm, str_c(path,lagtime, 'Y_lag_limma_results.tsv'))
-  print(str_c('Written output limma_results.tsv for lagtime ', lagtime, 'Y'))
-  
-  pp_vs_hcm_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm, output_label = str_c(lagtime, 'Y_lag_allpp_vs_hcm'),predictor = 'HCM status',output_path=path, xlimits=c(-1,2),ylimits=c(0,50)) 
-  
-  #Also for 5%FDR and 1%FDR
-  pp_vs_hcm_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm, output_label = str_c(lagtime, 'Y_lag_allpp_vs_hcm'),predictor = 'HCM status',output_path=path, pval = 'fdr', xlimits=c(-1,2),ylimits=c(0,50)) 
-  
-  rm(ukb_pp_cov_hcm, path)
+  if(isTRUE(limma_run)){
+    limma_hcm <- map(pp, ~limma_dpe(cc_tb,., covar=covars)) %>% bind_rows()
+    
+    limma_hcm <- left_join(limma_hcm, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent')) %>% unique()
+    write_tsv(limma_hcm, str_c(path,lagtime, 'Y_lag_limma_results.tsv'))
+    print(str_c('Written output limma_results.tsv for lagtime ', lagtime, 'Y'))
+    
+    pp_vs_hcm_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm, output_label = str_c(lagtime, 'Y_lag_allpp_vs_hcm'),predictor = 'HCM status',output_path=path, xlimits=c(-1,2),ylimits=c(0,50)) 
+    
+    #Also for 5%FDR and 1%FDR
+    pp_vs_hcm_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm, output_label = str_c(lagtime, 'Y_lag_allpp_vs_hcm'),predictor = 'HCM status',output_path=path, pval = 'fdr', xlimits=c(-1,2),ylimits=c(0,50)) 
+    
+    rm(ukb_pp_cov_hcm, path)
   
   return(limma_hcm)
+  } else{
+    return(c(sum(cc_tb$hcm==T), sum(cc_tb$hcm==F)))
+  }
+  
+
 }
 
-walk(lagtimes, ~main(., ukb_pp_list, hf_eid))
+# walk(lagtimes, ~main(., ukb_pp_list, hcm_diag_tb, hf_eid)) #Run limma
+perlagtime_tb <- map(lagtimes, ~main(., ukb_pp_list, hcm_diag_tb, hf_eid, limma_run=F)) #Don't run limma and only output the tbs
 ```
+# Case/Control Number for each Lagtime
+
+```{r}
+# case_numbers <- map_int(perlagtime_tb, ~lambda x(sum(x$hcm==T))) %>% bind_cols('Lagtime' = seq(0,17))
+# control_numbers <- map_int(perlagtime_tb, ~lambda x(sum(x$hcm==F))) %>% bind_cols('Lagtime' = seq(0,17))
+
+case_numbers <- "24,29,32,34,35,42,47,52,54,59,72,79,88,95,98,99,100"
+control_numbers <-"49114,49109,49106,49104,49103,49096,49092,49088,49086,49081,49069,49062,49053,49046,49043,49042,49041"
+
+n_tb <- bind_cols('lagtime'=seq(0,16),as.numeric(str_split_1(case_numbers,',')), as.numeric(str_split_1(control_numbers,',')))
+n_tb <- mutate(n_tb,lagtime = as_factor(lagtime))
+colnames(n_tb) <- c('lagtime', 'case_n','control_n')
+
+#Plot of case number over lagtime
+plot_output_path <- 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/HCM/rcmm_cov/allpanels/'
+
+
+n_plotter <- function(input_tb, plot_output_path, column_name='case_n'){
+  
+  if (column_name=='case_n'){label <- 'Cases'} else if (column_name=='control_n'){label <- 'Controls'}
+  
+  max_n = max(input_tb[[column_name]])
+  
+  n_plot <- ggplot(input_tb,aes(x=lagtime, y=.data[[column_name]]))+
+    geom_col()+
+    xlab('Lag Time Assumed (Years)')+
+    ylab(str_c('Number of ', label))+
+    geom_text(aes(label=.data[[column_name]]), nudge_y=max_n/20) #Dynamic height adjustment to 1/20 of the max value
+  
+  print(n_plot)
+  ggsave(str_c(plot_output_path, label,'_n.png'), dpi=600, width=9, height = 3)
+  
+}
+
+n_plotter(n_tb, plot_output_path)
+# n_plotter(n_tb, plot_output_path, 'control_n')
+```
+
 
 # Case-Control Comparison of Different Lagtimes 
 
@@ -404,23 +451,23 @@ timelag_plotter <- function(input_tb, metric, metric_name, pp_of_interest, outpu
   }
   
   # Add facets and theme
-  p <- p + facet_wrap(~num_instances_sig, scales = "fixed")+
+  p <- p + facet_wrap(~num_instances_sig, scales = "fixed", ncol=3)+
         labs(title=str_c("Line plot of plasma proteins' " , metric_name, ' over ', length(unique(plot_tb$lag)),' lag time instances facetted by number of lag times in which it is 5% FDR-significant'))
     }
   
   print(p)
   
-  ggsave(str_c(output_folder, 'summary_',metric, '_lineplot',suffix,'.png'), p, dpi=600, width = 12, height = 6)
+  ggsave(str_c(output_folder, 'summary_',metric, '_lineplot',suffix,'.png'), p, dpi=600, width = 9, height = 9)
   
 }
 
-timelag_plotter(lag_results, 'B', 'Beta',fdr5_proteins_all_lag, 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/HCM/rcmm_cov/allpanels/')
+timelag_plotter(lag_results, 'logFC', 'log2(Fold-Change)',fdr5_proteins_all_lag, 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/HCM/rcmm_cov/allpanels/')
 timelag_plotter(lag_results, 'ln_abs_beta', 'Ln(|Beta|)',fdr5_proteins_all_lag, 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/HCM/rcmm_cov/allpanels/')
 timelag_plotter(lag_results, 'fdr_pval', 'FDR-adjusted p-value',fdr5_proteins_all_lag, 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/HCM/rcmm_cov/allpanels/')
 timelag_plotter(lag_results, 'neglog10_fdr_pval', '-log10(FDR-adjusted p-value)',fdr5_proteins_all_lag, 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/HCM/rcmm_cov/allpanels/')
 
 #Ignore NTproBNP and NPPB
-timelag_plotter(lag_results, 'B', 'Beta',fdr5_proteins_all_lag[!fdr5_proteins_all_lag %in% c('ntprobnp','nppb')], 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/HCM/rcmm_cov/allpanels/', suffix='_wo_NTproBNP_NPPB')
+timelag_plotter(lag_results, 'logFC', 'log2(Fold-Change)',fdr5_proteins_all_lag[!fdr5_proteins_all_lag %in% c('ntprobnp','nppb')], 'OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/0_TimeInstancing/HCM/rcmm_cov/allpanels/', suffix='_wo_NTproBNP_NPPB')
 ```
 
 # Incident Cox HCM Diagnosis
