@@ -62,3 +62,4 @@ rsconnect/
 OUTPUT/*
 DATA/CKB/*
 *.yaml
+DATA/*
