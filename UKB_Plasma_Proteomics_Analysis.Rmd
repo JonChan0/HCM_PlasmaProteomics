@@ -1402,85 +1402,19 @@ ukb_pp <- ukb_pp %>%
   left_join(ukb_cv_prs, by=c('eid'='ID'))
 ```
 
-# Re-analysis on Training Set Only
+# SHAP Values Number Extraction
 
-This reruns the case-control association analysis only on the training set from ML (excluding the test set individuals).
-This starts from the ukb_pp_hcm_cov2 tibble btw which is saved as .tsv.
-
-```{r}
-train_eids <- read_csv('OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train_eid.csv')$eid
-test_eids <- read_csv('OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_test_eid.csv')$eid
-
-#This uses the 5Y time instancing of HF cases 
-ukb_cases <- read_tsv('DATA/UKB/PROCESSED/2_5Y/ukb_rap_HCM_20240209_5Ycases.tsv')
-colnames(ukb_cases) <- c('ID')
-
-rcmm_cov<-T
-include_nonCM_panels <- T
-
-instance <- '2_5Y'
-    
-if(isTRUE(include_nonCM_panels)){
-    ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
-    ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_allpanel.tsv')
-
-  } else{
-    ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
-    ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_cmpanel.tsv')
-  }
-
-pp <- ukb_pp_list$ukb_fieldname_equivalent[ukb_pp_list$ukb_fieldname_equivalent %in% colnames(ukb_pp_hcm_cov2)] %>%  #In case any PP are removed due to lack of non-NA values
-  unique()
-
-```
+This extracts some of the SHAP values for certain plasma proteins.
 
 ```{r}
-#This is using non-HF and non-HCM as controls (as opposed to just using non-HCM) but using all HCM as cases
-ukb_pp_hcm_cov <- ukb_pp_hcm_cov2  %>%
-  mutate(hcm = case_when(eid %in% ukb_cases$ID ~ T, #HCM cases independent of HF status
-                         !eid %in% ukb_cases$ID & !eid %in% hf_eid$ID ~ F, #Non-HF non-HCM controls
-                         T~NA)) %>% #non-HCM and HF 
-  filter(!is.na(hcm))
 
-#Filter for training set individuals here
+cases_shap_values <- read_tsv('OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap/xgboost_nofs_cov_ccFDR9only_XyALL__cases_ppfiltered_shap_values.tsv')
+controls_shap_values <- read_tsv('OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap/xgboost_nofs_cov_ccFDR9only_XyALL__cases_ppfiltered_shap_values.tsv')
 
-ukb_pp_hcm_cov_train <- ukb_pp_hcm_cov %>%
-  filter(eid %in% train_eids)
-
-sum(ukb_pp_hcm_cov_train$hcm==T)
-sum(ukb_pp_hcm_cov_train$hcm==F)
-
-if (isTRUE(rcmm_cov)){ #If using the extended covariate list suggested by Rob Clarke and Mohsen
-  covars <- c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','t2d','smoking','Townsend','eGFR', 'ldl')
-} else{
-  covars <- c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','t2d','smoking')
-}
-
-#Reduce the search space only to plasma proteins which have non-NA values in at least 1 HCM case e.g exlcude glipr1 and others
-tic()
-#Running by default with age/sex/genetic PCs/dbp/T2D/smoking status covariates but comparing HCM cases to non-HF/HCM controls
-limma_hcm_train<- map(pp, ~limma_dpe(ukb_pp_hcm_cov_train,., covar=covars)) %>% bind_rows()
-toc()
-
-if (isTRUE(rcmm_cov)){
-   extra_folders <- 'rcmm_cov/'
-}
-if(isTRUE(include_nonCM_panels)){
-  extra_folders <- str_c(extra_folders, 'allpanels/')
-} 
-path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_Train/', extra_folders) #Define the folder for output of plots and tabular data
-if(!dir.exists(path)){dir.create(path, recursive=T)}
-limma_hcm_train <- left_join(limma_hcm_train, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent')) %>% unique()
-write_tsv(limma_hcm_train,str_c(path,'limma_results.tsv'))
-
-pp_vs_hcm_train_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm_train, 'allpp_vs_hcm_train',predictor = 'HCM status',output_path=path, xlimits=c(-1,1.75), ylimits=c(0,35)) 
-
-#Also for 5%FDR and 1%FDR
-pp_vs_hcm_train_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm_train, 'allpp_vs_hcm_train',predictor = 'HCM status',output_path=path, pval = 'fdr', xlimits=c(-1,1.75), ylimits=c(0,35)) 
-
-rm(ukb_pp_hcm_cov, path)
+#Bootstrapped shap values
+cases_shap_bs <- read_csv('OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap/xgboost_nofs_cov_ccFDR9only_XyALL_bootstrapped_shap_values_cases.csv')
+controls_shap_bs <- read_csv('OUTPUT/UKB/ML/3_summary_plots/feature_importance/1_hcm_cc_noprs/shap/xgboost_nofs_cov_ccFDR9only_XyALL_bootstrapped_shap_values_controls.csv')
 ```
-
 
 
 
@@ -1691,3 +1625,83 @@ prs_X_train <- hcm_cc_5y_X_train %>%
 #Filter for those without cv_prs
 
 ```
+
+# Re-analysis on Training Set Only
+
+This reruns the case-control association analysis only on the training set from ML (excluding the test set individuals).
+This starts from the ukb_pp_hcm_cov2 tibble btw which is saved as .tsv.
+
+```{r}
+train_eids <- read_csv('OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_train_eid.csv')$eid
+test_eids <- read_csv('OUTPUT/UKB/ML/1_data/1_hcm_cc_noprs/X_test_eid.csv')$eid
+
+#This uses the 5Y time instancing of HF cases 
+ukb_cases <- read_tsv('DATA/UKB/PROCESSED/2_5Y/ukb_rap_HCM_20240209_5Ycases.tsv')
+colnames(ukb_cases) <- c('ID')
+
+rcmm_cov<-T
+include_nonCM_panels <- T
+
+instance <- '2_5Y'
+    
+if(isTRUE(include_nonCM_panels)){
+    ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+    ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_allpanel.tsv')
+
+  } else{
+    ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
+    ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_cmpanel.tsv')
+  }
+
+pp <- ukb_pp_list$ukb_fieldname_equivalent[ukb_pp_list$ukb_fieldname_equivalent %in% colnames(ukb_pp_hcm_cov2)] %>%  #In case any PP are removed due to lack of non-NA values
+  unique()
+
+```
+
+```{r}
+#This is using non-HF and non-HCM as controls (as opposed to just using non-HCM) but using all HCM as cases
+ukb_pp_hcm_cov <- ukb_pp_hcm_cov2  %>%
+  mutate(hcm = case_when(eid %in% ukb_cases$ID ~ T, #HCM cases independent of HF status
+                         !eid %in% ukb_cases$ID & !eid %in% hf_eid$ID ~ F, #Non-HF non-HCM controls
+                         T~NA)) %>% #non-HCM and HF 
+  filter(!is.na(hcm))
+
+#Filter for training set individuals here
+
+ukb_pp_hcm_cov_train <- ukb_pp_hcm_cov %>%
+  filter(eid %in% train_eids)
+
+sum(ukb_pp_hcm_cov_train$hcm==T)
+sum(ukb_pp_hcm_cov_train$hcm==F)
+
+if (isTRUE(rcmm_cov)){ #If using the extended covariate list suggested by Rob Clarke and Mohsen
+  covars <- c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','t2d','smoking','Townsend','eGFR', 'ldl')
+} else{
+  covars <- c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','t2d','smoking')
+}
+
+#Reduce the search space only to plasma proteins which have non-NA values in at least 1 HCM case e.g exlcude glipr1 and others
+tic()
+#Running by default with age/sex/genetic PCs/dbp/T2D/smoking status covariates but comparing HCM cases to non-HF/HCM controls
+limma_hcm_train<- map(pp, ~limma_dpe(ukb_pp_hcm_cov_train,., covar=covars)) %>% bind_rows()
+toc()
+
+if (isTRUE(rcmm_cov)){
+   extra_folders <- 'rcmm_cov/'
+}
+if(isTRUE(include_nonCM_panels)){
+  extra_folders <- str_c(extra_folders, 'allpanels/')
+} 
+path <- str_c('./OUTPUT/UKB/PLOTS/1_Case_vs_Control/2_Limma/',instance,'/HCM_Train/', extra_folders) #Define the folder for output of plots and tabular data
+if(!dir.exists(path)){dir.create(path, recursive=T)}
+limma_hcm_train <- left_join(limma_hcm_train, select(ukb_pp_list, Gene=Target, ukb_fieldname_equivalent), by=c('pp'='ukb_fieldname_equivalent')) %>% unique()
+write_tsv(limma_hcm_train,str_c(path,'limma_results.tsv'))
+
+pp_vs_hcm_train_marginal_bonferroni_summarytb_limma <- summary_plotter_limma(limma_hcm_train, 'allpp_vs_hcm_train',predictor = 'HCM status',output_path=path, xlimits=c(-1,1.75), ylimits=c(0,35)) 
+
+#Also for 5%FDR and 1%FDR
+pp_vs_hcm_train_marginal_fdr5_summarytb_limma <- summary_plotter_limma(limma_hcm_train, 'allpp_vs_hcm_train',predictor = 'HCM status',output_path=path, pval = 'fdr', xlimits=c(-1,1.75), ylimits=c(0,35)) 
+
+rm(ukb_pp_hcm_cov, path)
+```
+
