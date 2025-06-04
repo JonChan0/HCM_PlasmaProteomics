@@ -483,35 +483,55 @@ km_survival_curv_plotter <- function(input_tb, categorical_var, status, outcome_
     surv_fit <- survfit(surv_formula, data = input_tb)
     
     # Update the call in the fitted object so that the data and formula are directly accessible.
-    surv_fit$call$data <- input_tb
+    # This is good practice for ggsurvplot if data isn't explicitly passed to it later.
+    surv_fit$call$data <- quote(input_tb) # Use quote() for unevaluated expression
     surv_fit$call$formula <- surv_formula
     
     # Generate the survival plot using ggsurvplot
-    plot <- ggsurvplot(
+    # The 'plot' object here is a ggsurvplot object, which is a list of ggplots
+    plot_obj <- ggsurvplot(
       fit = surv_fit,
+      data = input_tb, # Explicitly passing data is good practice
       fun = type,
       pval = TRUE,
       conf.int = TRUE,
-      risk.table = 'abs_pct',
+      risk.table = 'abs_pct', # Shows absolute number and percentage
       risk.table.col = 'strata',
       linetype = 'strata',
       surv.median.line = 'hv',
+      break.time.by = 10, # Assuming 'Age' (outcome_var) is in years
       xlab = 'Age',
-      ncensor.plot = TRUE
+      ncensor.plot = TRUE, # Show number of censored subjects plot
+      ggtheme = theme_classic() # Added a theme for better aesthetics, optional
     )
     
-    print(plot)
+    # Print plot to R console/plotting window (optional during function execution)
+    # print(plot_obj) 
     
     # Create output folder if it does not exist
     if (!dir.exists(plot_output_folder)){
       dir.create(plot_output_folder, recursive = TRUE)
+      print(paste("Created output folder:", plot_output_folder))
     }
     
-    # Save plot to a PDF file
-    pdf(file.path(plot_output_folder, paste0(categorical_var, '_kaplan_', type, '.pdf')), width = 12, height = 9)
-    print(plot, newpage = FALSE)
+    # --- Save plot to a PDF file ---
+    pdf_filename <- file.path(plot_output_folder, paste0(categorical_var, '_kaplan_', type, '.pdf'))
+    pdf(pdf_filename, width = 12, height = 9)
+    # When printing a ggsurvplot object (which is a list of plots),
+    # the print method for ggsurvplot arranges and draws them.
+    print(plot_obj, newpage = FALSE) 
     dev.off()
+    print(paste("Saved PDF:", pdf_filename))
+    
+    # --- Save plot to a PNG file with DPI 600 ---
+    png_filename <- file.path(plot_output_folder, paste0(categorical_var, '_kaplan_', type, '.png'))
+    # For png, res is used for DPI. width and height are in inches by default.
+    png(png_filename, width = 12, height = 9, units = "in", res = 600)
+    print(plot_obj, newpage = FALSE) # Use the same print method as for PDF
+    dev.off()
+    print(paste("Saved PNG:", png_filename))
   }
+  print(paste('Finished plotting for', categorical_var))
 }
 
 ```
