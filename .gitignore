@@ -63,3 +63,5 @@ OUTPUT/*
 DATA/CKB/*
 *.yaml
 DATA/*
+
+POPGEN/AoU/*
