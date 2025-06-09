@@ -335,15 +335,17 @@ if (isTRUE(rcmm_cov)){
 sum(ukb_pp_hcm_cov2$hcm)
 ```
 
-Reimport data here
+### Reimport data here
 
 ```{r}
+# include_nonCM_panels <- T
+# instance <- '2_5Y'
 
 if(isTRUE(include_nonCM_panels)){
     ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
     
     ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_allpanel.tsv')
-  } else{
+  } else{ 
     ukb_pp_hcm_cov2 <- read_tsv(str_c('DATA/UKB/PROCESSED/', instance, '/ukb_cmpanelpp_hcm_covariates_bp_t2d_smoking_rcmmcov.tsv'))
     ukb_pp_list <- read_tsv('DATA/UKB/PROCESSED/ukb_pp_list_cmpanel.tsv')
   }
@@ -870,7 +872,170 @@ if (isTRUE(rcmm_cov)){ #If using the extended covariate list suggested by Rob Cl
 } else{
   covars <- c('age','sex','bmi','pc1','pc2','pc3','pc4','pc5','dbp','t2d','smoking')
 }
+```
 
+### Summary Table 
+
+This provides a summary table of the covariates + plasma proteins for UKB-PP individuals comparing HCM cases (independent of HF status) vs. non-HF/HCM controls.
+```{r}
+generate_summary_table_R <- function(input_df,
+                                     output_tsv_path,
+                                     mean_sd_vars = character(0),
+                                     median_iqr_vars = character(0)) {
+  # Check if input is a data frame
+  if (!is.data.frame(input_df)) {
+    stop("Input must be a data frame or tibble.")
+  }
+
+  # Get column names from the input data frame
+  col_names <- names(input_df)
+
+  # Handle the case of an empty data frame (0 columns)
+  if (length(col_names) == 0) {
+    summary_tibble <- tibble(
+      Original_Column = character(),
+      Summary = character(),
+      Non_NA_Count = integer()
+    )
+  } else {
+    # Use purrr::map_dfr to iterate over column names and create a summary row for each
+    summary_tibble <- purrr::map_dfr(col_names, function(col_name) {
+      column_vector <- dplyr::pull(input_df, col_name)
+      non_na_count <- sum(!is.na(column_vector))
+      summary_str <- "Error: Type not handled" # Default if no specific logic matches
+
+      # 1. Qualitative columns (character, factor, logical)
+      if (is.character(column_vector) || is.factor(column_vector) || is.logical(column_vector)) {
+        if (non_na_count > 0) {
+          temp_df <- dplyr::tibble(value_col = column_vector)
+          
+          category_summary_data <- temp_df %>%
+            dplyr::filter(!is.na(value_col)) %>%
+            dplyr::count(value_col, name = "n_cat") %>%
+            dplyr::mutate(perc_cat = (n_cat / sum(n_cat)) * 100) %>%
+            # Order categories by name for consistency
+            dplyr::arrange(as.character(value_col)) 
+
+          category_strings <- category_summary_data %>%
+            dplyr::mutate(text = sprintf("%s: %d (%.1f%%)", as.character(value_col), n_cat, perc_cat)) %>%
+            dplyr::pull(text)
+          
+          summary_str <- paste(category_strings, collapse = "; ")
+        } else {
+          summary_str <- "N/A (empty qualitative)"
+        }
+      } 
+      # 2. Numeric columns
+      else if (is.numeric(column_vector)) {
+        if (non_na_count > 0) {
+          if (col_name %in% mean_sd_vars) {
+            mean_val <- mean(column_vector, na.rm = TRUE)
+            sd_val <- sd(column_vector, na.rm = TRUE)
+            if (is.na(sd_val)) { # sd can be NA if only one non-NA value or all identical
+              summary_str <- sprintf("%.2f (SD N/A)", mean_val)
+            } else {
+              summary_str <- sprintf("%.2f \U00B1 %.2f", mean_val, sd_val) # Using Unicode for ±
+            }
+          } else if (col_name %in% median_iqr_vars) {
+            median_val <- median(column_vector, na.rm = TRUE)
+            q1_val <- quantile(column_vector, 0.25, na.rm = TRUE, names = FALSE)
+            q3_val <- quantile(column_vector, 0.75, na.rm = TRUE, names = FALSE)
+            summary_str <- sprintf("%.2f [%.2f - %.2f]", median_val, q1_val, q3_val)
+          } else { # Default for numeric columns not specified in either list i.e median
+            median_val <- median(column_vector, na.rm = TRUE)
+            q1_val <- quantile(column_vector, 0.25, na.rm = TRUE, names = FALSE)
+            q3_val <- quantile(column_vector, 0.75, na.rm = TRUE, names = FALSE)
+            summary_str <- sprintf("%.2f [%.2f - %.2f]", median_val, q1_val, q3_val)
+          }
+        } else {
+          summary_str <- "N/A (empty numeric)"
+        }
+      }
+      # 3. Other types (should ideally not happen with typical data frames)
+      else {
+        summary_str <- "N/A (unsupported type)"
+      }
+      
+      dplyr::tibble(
+        Original_Column = col_name,
+        Summary = summary_str,
+        Non_NA_Count = as.integer(non_na_count)
+      )
+    })
+  }
+
+  # Write the summary tibble to a TSV file
+  readr::write_tsv(summary_tibble, output_tsv_path)
+  
+  message(paste("Summary table successfully saved to", output_tsv_path))
+  # Optionally return the tibble for use in R environment
+  return(summary_tibble)
+}
+```
+
+
+```{r}
+sig_pp <- c('ntprobnp','nppb','stc2','tnni3','ltbp2','ace2','hrc','f7','angpt2')
+
+self_rep_ethnicity <- read_tsv('../../HCM_IntScore/ukb_sets/rap/cohort_tsvs/20240425_allukb_ageattended_sex_commonvarPCs20_genetickinship_ethnicity_cmrparams_bmi_dbp_sbp_rvcmr.tsv') %>%
+  select(eid, 'self_reported_ethnicity'=`21000-0.0`)
+
+ukb_pp_hcm_cov <- ukb_pp_hcm_cov %>%
+  left_join(self_rep_ethnicity, by='eid')
+
+summary_vars <- c('hcm',covars[1:2],'self_reported_ethnicity',covars[3:length(covars)],sig_pp)
+
+#Evaluate normality of all the phenotypes to decide whether to use mean or median
+walk2(select(ukb_pp_hcm_cov, all_of(sig_pp)), sig_pp,~print(hist(.x, xlab = .y)))
+walk2(select(ukb_pp_hcm_cov, all_of(covars[!covars %in% c('sex','t2d','smoking')])), covars[!covars %in% c('sex','t2d','smoking')],~print(hist(.x, xlab = .y)))
+```
+
+
+```{r}
+ukb_pp_hcm_cov_summary <- ukb_pp_hcm_cov %>%
+  select(all_of(summary_vars)) %>%
+  select(-starts_with('pc'))
+
+#Organise the self_reported_ethnicity into suitable groups
+ukb_pp_hcm_cov_summary <-ukb_pp_hcm_cov_summary %>%
+    mutate(
+    ethnicity_grouped = case_when(
+      # Asian Group
+      self_reported_ethnicity %in% c("Indian", "Pakistani", "Bangladeshi", "Chinese", 
+                                     "Any other Asian background", "Asian or Asian British") ~ "Asian",
+      # Black Group
+      self_reported_ethnicity %in% c("African", "Caribbean", "Any other Black background", 
+                                     "Black or Black British") ~ "Black",
+      # White Group
+      self_reported_ethnicity %in% c("British", "Irish", "Any other white background", 
+                                     "White") ~ "White",
+      # Mixed Group
+      self_reported_ethnicity %in% c("Mixed", "Any other mixed background", "White and Asian", 
+                                     "White and Black African", "White and Black Caribbean") ~ "Mixed",
+      # Other Group
+      self_reported_ethnicity %in% c("Other ethnic group") ~ "Other",
+      # Unknown/Not Stated Group
+      self_reported_ethnicity %in% c("Do not know", "Prefer not to answer") ~ "Unknown/Not Stated",
+      
+      # Fallback for any categories not explicitly listed.
+      # This will assign NA to any category not covered above.
+      # You could change NA_character_ to "Other" or a specific "Uncategorized" label if preferred.
+      TRUE ~ NA_character_ 
+    )
+  )
+
+ukb_pp_hcm_cov_summary_cases <- ukb_pp_hcm_cov_summary %>% filter(hcm==T) %>% select(-hcm)
+ukb_pp_hcm_cov_summary_controls <- ukb_pp_hcm_cov_summary %>% filter(hcm==F) %>% select(-hcm)
+
+cases_table <- generate_summary_table_R(ukb_pp_hcm_cov_summary_cases,str_c('OUTPUT/UKB/', instance, '_summary_cases.tsv'),
+                         mean_sd_vars <- c(sig_pp,'dbp','ldl'), median_iqr_vars = c('age','bmi','Townsend','eGFR'))
+controls_table <- generate_summary_table_R(ukb_pp_hcm_cov_summary_controls,str_c('OUTPUT/UKB/', instance, '_summary_controls.tsv'),
+                         mean_sd_vars <- c(sig_pp,'dbp','ldl'), median_iqr_vars = c('age','bmi','Townsend','eGFR'))
+
+```
+
+
+```{r hcm_nonHF_nonHCM_controls}
 #Reduce the search space only to plasma proteins which have non-NA values in at least 1 HCM case e.g exlcude glipr1 and others
 tic()
 #Running by default with age/sex/genetic PCs/dbp/T2D/smoking status covariates but comparing HCM cases to non-HF/HCM controls
@@ -1091,6 +1256,9 @@ instance <- '2_5Y'
 rcmm_cov<- T
 include_nonCM_panels=T
 
+ukb_pp_list <- bind_rows(olink_cm_panel, olink_nonCM_panels) %>%
+  filter(ukb_fieldname_equivalent != 'glipr1')
+
 # pp_scaling <- 'scale' #This flag is used if you want to flag the scales via scale()
 pp_scaling <- 'ranknorm'
 
@@ -1138,6 +1306,7 @@ ukb_outcomes <- read_tsv('../../HCM_Severity/DATASETS/UKB/RAP/Outcomes/Processed
 ```
 
 
+
 ```{r}
 ukb_diag_cox_tb <- ukb_pp %>%
   left_join(select(ukb_outcomes,ID, lost_age, death_age, age_attend_i0, dob_approx), by=c('eid'='ID')) %>%
@@ -1152,6 +1321,14 @@ ukb_diag_cox_tb <- ukb_diag_cox_tb %>%
   ungroup()
 
 #write_tsv(ukb_diag_cox_tb, str_c('DATA/UKB/PROCESSED/',instance,'/ukb_ALLpanel_pp_hcm_covariates_bp_t2d_smoking_rcmmcov_HCMdiagCox_pp', pp_scaling, '.tsv'))
+
+#Also output the median follow-up age where follow-up age = either date of censoring or incident event
+ukb_diag_cox_tb <- ukb_diag_cox_tb %>%
+  mutate(followup_time = incidenthcm_age-age_attend_i0)
+
+median(ukb_diag_cox_tb$followup_time)
+quantile(ukb_diag_cox_tb$followup_time, 0.25)
+quantile(ukb_diag_cox_tb$followup_time, 0.75)
 ```
 
 ## Multivariate Cox

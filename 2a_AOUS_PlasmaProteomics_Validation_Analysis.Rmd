@@ -432,11 +432,11 @@ bucket_rds_importer <- function(basepath, filename){
 
 bucket_basepath <- 'gs://fc-secure-1e7ad4a9-ae59-4c79-845f-64924aebf907/PP/DATA/'
 
-demo_cov <- bucket_rds_importer(bucket_basepath,'all_demo_bmi_dbp_deprivation.rds')
-cardio_biomarkers_cleaned_sdfiltered <- bucket_rds_importer(bucket_basepath,'all_pp_sdfiltered.rds')
-diagnoses_cleaned <- bucket_rds_importer(bucket_basepath,'all_hcm_hf_t2d_diag.rds')
-creatinine_hdl_ldl_cleaned <- bucket_rds_importer(bucket_basepath,'all_creatinine_hdl_ldl.rds')
-smoking_cleaned <- bucket_rds_importer(bucket_basepath,'all_smoking.rds')
+# demo_cov <- bucket_rds_importer(bucket_basepath,'all_demo_bmi_dbp_deprivation.rds')
+# cardio_biomarkers_cleaned_sdfiltered <- bucket_rds_importer(bucket_basepath,'all_pp_sdfiltered.rds')
+# diagnoses_cleaned <- bucket_rds_importer(bucket_basepath,'all_hcm_hf_t2d_diag.rds')
+# creatinine_hdl_ldl_cleaned <- bucket_rds_importer(bucket_basepath,'all_creatinine_hdl_ldl.rds')
+# smoking_cleaned <- bucket_rds_importer(bucket_basepath,'all_smoking.rds')
 ```
 
 ## EDA
@@ -828,8 +828,6 @@ saveRDS(biomarker_diagnoses_demo3_lst, './DATA/biomarker_diagnoses_demo3_lst.rds
 # biomarker_diagnoses_demo3_lst <- readRDS('./DATA/biomarker_diagnoses_demo3_lst.rds')
 ```
 
-
-
 This evaluates how many non-NA individuals exist for any combination of covariates used.
 
 ```{r}
@@ -858,21 +856,289 @@ nonNA_checker <- function(input_tb, biomarker_name, covariates_of_interest, inst
 walk2(biomarker_diagnoses_demo2_lst,names(biomarker_diagnoses_demo2_lst), ~nonNA_checker(.x,.y, c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index'))) #For each of the biomarkers in biomarker_names
 
 #This is with the RCMM expanded list of covariates including eGFR/HDL/LDL
-covfiltered_biomarker_diagnoses_demo3_lst <- map2(biomarker_diagnoses_demo3_lst, names(biomarker_diagnoses_demo3_lst), ~nonNA_checker(.x,.y, c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index', 'eGFR', 'HDL','LDL'))) #For each of the biomarkers in biomarker_names
+covfiltered_biomarker_diagnoses_demo3_lst_tbs <- map2(biomarker_diagnoses_demo3_lst, names(biomarker_diagnoses_demo3_lst), ~nonNA_checker(.x,.y, c('age','sex_at_birth','bmi','pc1','pc2','pc3','pc4','pc5','dbp', 'deprivation_index', 'eGFR', 'HDL','LDL'))) #For each of the biomarkers in biomarker_names
 
 #Output the total number of unique cases and controls who have at least one of the biomarkers AFTER filtering for 
-for (i in seq_along(covfiltered_biomarker_diagnoses_demo3_lst)){
+for (i in seq_along(covfiltered_biomarker_diagnoses_demo3_lst_tbs)){
   covfiltered_biomarker_diagnoses_demo3_lst[[i]] <- select(covfiltered_biomarker_diagnoses_demo3_lst[[i]], person_id, hcm_5Y_status)
   }
 
-test_tb <- reduce(covfiltered_biomarker_diagnoses_demo3_lst, bind_rows) %>% distinct()
-print(length(unique(test_tb$person_id))) #41595
-test_tb2 <- filter(test_tb, hcm_5Y_status==T)
-print(length(unique(test_tb2$person_id))) #546 cases
-#The nrow of test_tb is 41634 because there are 39 cases who flip flop
+#Unique person IDs with at least one-non NA biomarker and non-NA in all covariates
+all_individuals <- reduce(covfiltered_biomarker_diagnoses_demo3_lst, bind_rows) %>% distinct()
+print(length(unique(all_individuals$person_id))) #41595
 
-rm(test_tb,test_tb2,covfiltered_biomarker_diagnoses_demo3_lst)
+#HCM_5Y individual IDs with at least one-non NA biomarker and non-NA in all covariates
+hcm_5Y_indivs <- filter(all_individuals, hcm_5Y_status==T)
+print(length(unique(hcm_5Y_indivs$person_id))) #546 cases
+#The nrow of test_tb is 41634 because there are 39 cases who flip flop depending on the measurement time
+
+# rm(test_tb,test_tb2,covfiltered_biomarker_diagnoses_demo3_lst)
 ```
+
+
+### Summary Table
+
+This provides a summary table of all individuals for publication.
+It also divides into HCM cases vs. non-HCM/HF controls.
+
+Because certain covariates and the HCM_5Y 'case' status itself differs depending on the measurement time of the the plasma protein, for the summary table, I actually use the OV status instead.
+
+```{r}
+covars <- c('person_id','date_of_birth','sex_at_birth','ancestry_pred','bmi','dbp','deprivation_index','eGFR','LDL','HDL') #Lacks T2D for now btw
+pp <- names(covfiltered_biomarker_diagnoses_demo3_lst_tbs)
+
+#Filter to only covars and pp
+covfiltered_biomarker_diagnoses_demo3_lst_tbs <- map2(covfiltered_biomarker_diagnoses_demo3_lst_tbs,pp, ~select(.x,all_of(c(covars,.y))))
+
+summary_tb <- reduce(covfiltered_biomarker_diagnoses_demo3_lst_tbs, full_join,by=c('person_id', 'sex_at_birth','date_of_birth','ancestry_pred'))
+```
+
+```{r}
+# Get all column names from the fully merged tibble
+all_cols <- names(summary_tb)
+
+# Identify unique "base" column names by stripping .x, .y, .x.x, etc. suffixes
+target_base_names <- unique(gsub("(\\.(x|y))+$", "", all_cols))
+data_base_names <- setdiff(target_base_names, c('person_id', 'sex_at_birth','date_of_birth','ancestry_pred',pp))
+
+# Initialize the tibble for processing
+final_tibble <- summary_tb
+
+# Loop through each base name to process its variants
+for (current_base_name in data_base_names) {
+  # Find all columns in the original merged tibble that correspond to this base name
+  variant_cols <- grep(paste0("^", current_base_name, "(\\.(x|y))*$"),
+                       names(summary_tb),
+                       value = TRUE)
+  
+  if (length(variant_cols) == 0) next
+
+  final_tibble <- final_tibble %>%
+    rowwise() %>% # This makes the following mutate operation act on each row
+    mutate(
+      !!sym(current_base_name) := {
+        # This block is the custom logic for merging/coalescing
+        row_values <- c_across(all_of(variant_cols))
+        non_na_vals <- row_values[!is.na(row_values)]
+        
+        # Get the type of the first variant column to ensure type-correct NAs
+        first_variant_col <- summary_tb[[variant_cols[1]]] 
+        
+        # --- CORRECTION ---
+        # Define the appropriate NA type using a standard if/else block
+        # This avoids the strict type-checking of `case_when()` that caused the error.
+        if (is.numeric(first_variant_col)) {
+          na_to_return <- NA_real_
+        } else if (is.character(first_variant_col)) {
+          na_to_return <- NA_character_
+        } else if (is.logical(first_variant_col)) {
+          na_to_return <- NA
+        } else {
+          na_to_return <- NA # Default fallback
+        }
+        
+        # --- CRITICAL WARNING for floating point (decimal) numbers ---
+        # Direct comparison of decimal numbers (like in `unique()`) can be risky.
+        # 26.50000 and 26.50001 will be seen as different. For such columns,
+        # you may want to check if they are "close enough" using a tolerance.
+        # This example uses direct comparison as requested.
+        
+        if (length(non_na_vals) == 0) {
+          # CASE 1: No non-NA values exist. Return NA.
+          na_to_return
+        } else if (length(unique(non_na_vals)) == 1) {
+          # CASE 2: All non-NA values are identical (or only one exists). Use that value.
+          unique(non_na_vals)[1]
+        } else {
+          # CASE 3: Multiple non-NA values exist, but they are different. Return NA.
+          na_to_return
+        }
+      }
+    ) %>%
+    ungroup() # IMPORTANT: Always ungroup after a rowwise operation
+}
+
+
+# 5. SELECT THE FINAL, CLEANED COLUMNS
+# Keep the research ID and the newly created/updated base name columns.
+# This drops all the intermediate suffixed columns (.x, .y, etc.).
+final_summary_tb <- final_tibble %>%
+  select(all_of(c('person_id', 'sex_at_birth','date_of_birth','ancestry_pred')), all_of(data_base_names))
+```
+
+```{r}
+#Assume age is at October 1 2023 (cutoff date for V8)
+final_summary_tb <- final_summary_tb %>%
+  mutate(date_of_birth = ymd(date_of_birth)) %>%
+  mutate(age = time_length(interval(date_of_birth,ymd('2023-10-01')), "year"))
+
+#Add the plasma protein values 
+final_summary_tb <- left_join(final_summary_tb, select(summary_tb,person_id, all_of(pp)))
+
+write_tsv(final_summary_tb, 'DATA/final_summary_tb.tsv')
+rm(final_tibble)
+```
+
+```{r}
+generate_summary_table_R <- function(input_df,
+                                     output_tsv_path,
+                                     mean_sd_vars = character(0),
+                                     median_iqr_vars = character(0)) {
+  # Check if input is a data frame
+  if (!is.data.frame(input_df)) {
+    stop("Input must be a data frame or tibble.")
+  }
+
+  # Get column names from the input data frame
+  col_names <- names(input_df)
+
+  # Handle the case of an empty data frame (0 columns)
+  if (length(col_names) == 0) {
+    summary_tibble <- tibble(
+      Original_Column = character(),
+      Summary = character(),
+      Non_NA_Count = integer()
+    )
+  } else {
+    # Use purrr::map_dfr to iterate over column names and create a summary row for each
+    summary_tibble <- purrr::map_dfr(col_names, function(col_name) {
+      column_vector <- dplyr::pull(input_df, col_name)
+      non_na_count <- sum(!is.na(column_vector))
+      summary_str <- "Error: Type not handled" # Default if no specific logic matches
+
+      # 1. Qualitative columns (character, factor, logical)
+      if (is.character(column_vector) || is.factor(column_vector) || is.logical(column_vector)) {
+        if (non_na_count > 0) {
+          temp_df <- dplyr::tibble(value_col = column_vector)
+          
+          category_summary_data <- temp_df %>%
+            dplyr::filter(!is.na(value_col)) %>%
+            dplyr::count(value_col, name = "n_cat") %>%
+            dplyr::mutate(perc_cat = (n_cat / sum(n_cat)) * 100) %>%
+            # Order categories by name for consistency
+            dplyr::arrange(as.character(value_col)) 
+
+          category_strings <- category_summary_data %>%
+            dplyr::mutate(text = sprintf("%s: %d (%.1f%%)", as.character(value_col), n_cat, perc_cat)) %>%
+            dplyr::pull(text)
+          
+          summary_str <- paste(category_strings, collapse = "; ")
+        } else {
+          summary_str <- "N/A (empty qualitative)"
+        }
+      } 
+      # 2. Numeric columns
+      else if (is.numeric(column_vector)) {
+        if (non_na_count > 0) {
+          if (col_name %in% mean_sd_vars) {
+            mean_val <- mean(column_vector, na.rm = TRUE)
+            sd_val <- sd(column_vector, na.rm = TRUE)
+            if (is.na(sd_val)) { # sd can be NA if only one non-NA value or all identical
+              summary_str <- sprintf("%.2f (SD N/A)", mean_val)
+            } else {
+              summary_str <- sprintf("%.2f \U00B1 %.2f", mean_val, sd_val) # Using Unicode for ±
+            }
+          } else if (col_name %in% median_iqr_vars) {
+            median_val <- median(column_vector, na.rm = TRUE)
+            q1_val <- quantile(column_vector, 0.25, na.rm = TRUE, names = FALSE)
+            q3_val <- quantile(column_vector, 0.75, na.rm = TRUE, names = FALSE)
+            summary_str <- sprintf("%.2f [%.2f - %.2f]", median_val, q1_val, q3_val)
+          } else { # Default for numeric columns not specified in either list i.e median
+            median_val <- median(column_vector, na.rm = TRUE)
+            q1_val <- quantile(column_vector, 0.25, na.rm = TRUE, names = FALSE)
+            q3_val <- quantile(column_vector, 0.75, na.rm = TRUE, names = FALSE)
+            summary_str <- sprintf("%.2f [%.2f - %.2f]", median_val, q1_val, q3_val)
+          }
+        } else {
+          summary_str <- "N/A (empty numeric)"
+        }
+      }
+      # 3. Other types (should ideally not happen with typical data frames)
+      else {
+        summary_str <- "N/A (unsupported type)"
+      }
+      
+      dplyr::tibble(
+        Original_Column = col_name,
+        Summary = summary_str,
+        Non_NA_Count = as.integer(non_na_count)
+      )
+    })
+  }
+
+  # Write the summary tibble to a TSV file
+  readr::write_tsv(summary_tibble, output_tsv_path)
+  
+  message(paste("Summary table successfully saved to", output_tsv_path))
+  # Optionally return the tibble for use in R environment
+  return(summary_tibble)
+}
+```
+
+```{r}
+#Perform rank-based inverse normalisation of the pp
+inverse_rank_transformer <- function(data,columns){ #Columns are a vector of characters
+  
+  for (i in columns){
+    col_label <- i
+    col_label_before <- columns[match(i,columns)-1]
+    mask <- !is.na(data[[i]]) #Mask to filter out NA values
+                             
+    # Filter out NA values for that phenotype
+    data_copy <- subset(data, mask)
+    data_copy[[i]] <- RNOmni::RankNorm(data_copy[[i]]) #Performing rank-inverse normalisation
+    data_copy <- select(data_copy, 'person_id',all_of(i)) #Taking only the column with SitePatID and the column of interest
+    
+    data <- select(data, - i) %>% #Removing the original column and adding back the new column after rank-inverse normalisation
+      left_join(data_copy, by='person_id') %>%
+      relocate(i, .after=!!col_label_before) #Moving the appended column back to its original index
+    
+    hist(data[[i]], main=i,xlab=i)
+  }
+  return(data)
+}
+
+ppnorm_summary_tb <- inverse_rank_transformer(final_summary_tb, pp)
+
+#Add T2D overall status as a summary covariate
+ppnorm_summary_tb <- mutate(ppnorm_summary_tb) %>%
+  mutate(t2d = ifelse(person_id %in% diagnoses_cleaned[['t2d']]$person_id, T,F))
+
+#Filter down to phenotypes to summarise
+covars <- c('age','sex_at_birth','ancestry_pred','bmi','dbp','deprivation_index','eGFR','LDL','HDL','t2d')
+summary_vars <- c(covars, pp)
+print(summary_vars)
+
+indiv_summary_tb <- ppnorm_summary_tb %>%
+  select('person_id',all_of(summary_vars))
+rm(final_summary_tb, summary_tb, ppnorm_summary_tb)
+
+#Evaluate normality of all the phenotypes to decide whether to use mean or median
+walk2(select(indiv_summary_tb , all_of(pp)), pp,~print(hist(.x, xlab = .y)))
+walk2(select(indiv_summary_tb, all_of(covars[!covars %in% c('sex_at_birth','ancestry_pred','t2d')])), covars[!covars %in% c('sex_at_birth','ancestry_pred','t2d')],~print(hist(.x, xlab = .y)))
+
+#Only DBP is normally distributed so mean +/- SD
+```
+Here we generate summary tibbles for the cases and controls separately.
+
+```{r}
+indiv_summary_tb_hcm <- indiv_summary_tb %>%
+  filter(person_id %in% hcm_5Y_indivs$person_id) %>%
+  select(-person_id)
+
+#These controls aren't technically the same as used in the case-control analysis because in the case-control analysis, the HF status is defined as HF_5Y status which is dependent on the measurement time of the biomarker and calculated on a per-individual level.
+#So here the controls represent all individuals who aren't of the HCM_5Y status so include individuals who are diagnosed with HCM after the measurement time + 5Y but I also remove individuals who are diagnosed with HF overall (at any time)
+
+indiv_summary_tb_controls <- indiv_summary_tb %>%
+  filter(!person_id %in% hcm_5Y_indivs$person_id) %>%
+  filter(!person_id %in% diagnoses_cleaned[['hf']]$person_id) %>%
+  select(-person_id)
+
+cases_summary <- generate_summary_table_R(indiv_summary_tb_hcm,'DATA/indiv_summary_hcm.tsv',c(pp,'dbp'),
+                         covars[covars!= 'dbp'])
+control_summary <- generate_summary_table_R(indiv_summary_tb_controls,'DATA/indiv_summary_controls.tsv',c(pp,'dbp'),covars[covars!= 'dbp'])
+```
+
 
 ## Case-Control Analyses
 

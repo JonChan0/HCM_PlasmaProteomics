@@ -25,22 +25,23 @@ This notebook looks at cross-trait associations within HCMR, evaluating them usi
 # Import
 
 ```{r import}
-hcmr_prs <- read.table('../HCM_IntScore/genscore/pred/prs/HCMR/IMPUTED/archive_noINFOfilter/hcmr_imputedvars_prs.profile',header=T) %>%
+hcmr_prs <- read.table('../../HCM_IntScore/genscore/pred/prs/HCMR/IMPUTED/archive_noINFOfilter/hcmr_imputedvars_prs.profile',header=T) %>%
   select(HCR_IDs=IID, cv_prs=SCORE)
 
 #This is as per OMGL classifications
-hcmr_rarevar <- read_tsv('rarevar_subset_analysis/output/data/hcmr_rarevar_class_plp_vusfpvus.tsv') %>%
+hcmr_rarevar <- read_tsv('../../EDA_HCMR/rarevar_subset_analysis/output/data/hcmr_rarevar_class_plp_vusfpvus.tsv') %>%
   dplyr::rename('rarevar_class'=class, 'HCR_IDs'='HCR_ID')
-  
-total_df_notransform <- readRDS('output/data/total_notransform_df.rds') %>%
+
+total_df_notransform <- readRDS('../../EDA_HCMR/output/data/total_notransform_df.rds') %>%
   mutate(ecvfwhole=ecvfwhole*100)
 
-total_i_all_cont_phenotypes <- readRDS('output/data/total_i_all_cont_phenotypes.rds')
+total_i_all_cont_phenotypes <- readRDS('../../EDA_HCMR/output/data/total_i_all_cont_phenotypes.rds')
+
 total_df_notransform_prs_rare <- left_join(total_df_notransform, hcmr_prs, by='HCR_IDs') %>% left_join(select(hcmr_rarevar, HCR_IDs, rarevar_class))
 total_i_all_cont_phenotypes <- c(total_i_all_cont_phenotypes, ncol(total_df_notransform_prs_rare)-1,ncol(total_df_notransform_prs_rare))
 rm(total_df_notransform)
 
-label_tb <- read_tsv('output/data/combo_labels.tsv') 
+label_tb <- read_tsv('../../EDA_HCMR/output/data/combo_labels.tsv') 
 label_tb$Label[label_tb$Variable=='ecvfwhole'] <- 'Whole LV ECVF (based on 3 slices) (%)'
 
 
@@ -55,7 +56,7 @@ filtered_tb <- total_df_notransform_prs_rare %>%
 rm(hcmr_prs, hcmr_rarevar)
 
 #Import in the 10PCs generated in HCMR only
-eigenvectors <- read_tsv('popgen/2_gwas/data/hcmr/HCMR_HARDCALLS/eigenvectors_hcmr_10pcs') %>%
+eigenvectors <- read_tsv('../../EDA_HCMR/popgen/2_gwas/data/hcmr/HCMR_HARDCALLS/eigenvectors_hcmr_10pcs') %>%
   rename_with(~str_replace(.,'U','pc'),contains('U'))
 
 filtered_tb <- filtered_tb %>%
@@ -121,8 +122,9 @@ hty <- c('lvmassi')
 
 
 ```{r normalisation}
-#Inverse based rank transform all the phenotypes
+#Inverse based rank transform pp
 rank_transform_columns <- c(pp,fibr,func, hty, 'wallthkmax')
+# rank_transform_columns <- c(pp)
 rank_transformed_tb <- inverse_rank_transformer(filtered_tb, rank_transform_columns)
 
 #Merge back everything together
@@ -144,7 +146,145 @@ label_tb <- label_tb %>%
   
 
 ```
+### Summary Table
 
+This outputs a summary table for publication.
+
+```{r}
+#Only rank-transform the pp and not the CMR parameters
+
+#Inverse based rank transform pp
+rank_transform_columns <- c(pp)
+rank_transformed_tb <- inverse_rank_transformer(filtered_tb, rank_transform_columns)
+
+#Merge back everything together
+
+pponly_transformed_tb <- select(filtered_tb, colnames(filtered_tb)[!colnames(filtered_tb) %in% c(#log_transform_columns, 
+  rank_transform_columns)]) %>%
+  #bind_cols(select(log_transformed_tb, log_transform_columns)) %>%
+  bind_cols(select(rank_transformed_tb, rank_transform_columns)) %>%
+  mutate(cv_prs=scale(cv_prs)) #Also need to scale CV_PRS
+
+rm(log_transformed_tb, rank_transformed_tb)
+```
+
+```{r}
+covars <- c('age','sex','self_reported_ethnicity','bmi','bsa','cmrdiabp','sarcomere')
+
+#Add back the self-reported ethnicity to 
+summary_tb <- pponly_transformed_tb %>%
+  left_join(select(total_df_notransform_prs_rare,HCR_IDs,race)) %>%
+  select(-starts_with('pc')) %>%
+  dplyr::rename('sex'='gender','self_reported_ethnicity'='race') %>%
+  select(all_of(c(covars,'wallthkmax',hty, func,fibr,pp)))
+
+#Evaluate normality of each continuous variable
+walk2(select(summary_tb, all_of(pp)), pp,~print(hist(.x, xlab = .y)))
+walk2(select(summary_tb, all_of(covars[!covars %in% c('sex','self_reported_ethnicity','sarcomere')])), covars[!covars %in% c('sex','self_reported_ethnicity','sarcomere')],~print(hist(.x, xlab = .y)))
+walk2(select(summary_tb, all_of(c('wallthkmax',hty,func,fibr))), c('wallthkmax',hty,func,fibr),~print(hist(.x, xlab = .y)))
+```
+
+```{r}
+generate_summary_table_R <- function(input_df,
+                                     output_tsv_path,
+                                     mean_sd_vars = character(0),
+                                     median_iqr_vars = character(0)) {
+  # Check if input is a data frame
+  if (!is.data.frame(input_df)) {
+    stop("Input must be a data frame or tibble.")
+  }
+
+  # Get column names from the input data frame
+  col_names <- names(input_df)
+
+  # Handle the case of an empty data frame (0 columns)
+  if (length(col_names) == 0) {
+    summary_tibble <- tibble(
+      Original_Column = character(),
+      Summary = character(),
+      Non_NA_Count = integer()
+    )
+  } else {
+    # Use purrr::map_dfr to iterate over column names and create a summary row for each
+    summary_tibble <- purrr::map_dfr(col_names, function(col_name) {
+      column_vector <- dplyr::pull(input_df, col_name)
+      non_na_count <- sum(!is.na(column_vector))
+      summary_str <- "Error: Type not handled" # Default if no specific logic matches
+
+      # 1. Qualitative columns (character, factor, logical)
+      if (is.character(column_vector) || is.factor(column_vector) || is.logical(column_vector)) {
+        if (non_na_count > 0) {
+          temp_df <- dplyr::tibble(value_col = column_vector)
+          
+          category_summary_data <- temp_df %>%
+            dplyr::filter(!is.na(value_col)) %>%
+            dplyr::count(value_col, name = "n_cat") %>%
+            dplyr::mutate(perc_cat = (n_cat / sum(n_cat)) * 100) %>%
+            # Order categories by name for consistency
+            dplyr::arrange(as.character(value_col)) 
+
+          category_strings <- category_summary_data %>%
+            dplyr::mutate(text = sprintf("%s: %d (%.1f%%)", as.character(value_col), n_cat, perc_cat)) %>%
+            dplyr::pull(text)
+          
+          summary_str <- paste(category_strings, collapse = "; ")
+        } else {
+          summary_str <- "N/A (empty qualitative)"
+        }
+      } 
+      # 2. Numeric columns
+      else if (is.numeric(column_vector)) {
+        if (non_na_count > 0) {
+          if (col_name %in% mean_sd_vars) {
+            mean_val <- mean(column_vector, na.rm = TRUE)
+            sd_val <- sd(column_vector, na.rm = TRUE)
+            if (is.na(sd_val)) { # sd can be NA if only one non-NA value or all identical
+              summary_str <- sprintf("%.2f (SD N/A)", mean_val)
+            } else {
+              summary_str <- sprintf("%.2f \U00B1 %.2f", mean_val, sd_val) # Using Unicode for ±
+            }
+          } else if (col_name %in% median_iqr_vars) {
+            median_val <- median(column_vector, na.rm = TRUE)
+            q1_val <- quantile(column_vector, 0.25, na.rm = TRUE, names = FALSE)
+            q3_val <- quantile(column_vector, 0.75, na.rm = TRUE, names = FALSE)
+            summary_str <- sprintf("%.2f [%.2f - %.2f]", median_val, q1_val, q3_val)
+          } else { # Default for numeric columns not specified in either list i.e median
+            median_val <- median(column_vector, na.rm = TRUE)
+            q1_val <- quantile(column_vector, 0.25, na.rm = TRUE, names = FALSE)
+            q3_val <- quantile(column_vector, 0.75, na.rm = TRUE, names = FALSE)
+            summary_str <- sprintf("%.2f [%.2f - %.2f]", median_val, q1_val, q3_val)
+          }
+        } else {
+          summary_str <- "N/A (empty numeric)"
+        }
+      }
+      # 3. Other types (should ideally not happen with typical data frames)
+      else {
+        summary_str <- "N/A (unsupported type)"
+      }
+      
+      dplyr::tibble(
+        Original_Column = col_name,
+        Summary = summary_str,
+        Non_NA_Count = as.integer(non_na_count)
+      )
+    })
+  }
+
+  # Write the summary tibble to a TSV file
+  readr::write_tsv(summary_tibble, output_tsv_path)
+  
+  message(paste("Summary table successfully saved to", output_tsv_path))
+  # Optionally return the tibble for use in R environment
+  return(summary_tibble)
+}
+```
+
+```{r}
+hcmr_summary_output <- generate_summary_table_R(summary_tb, 'OUTPUT/HCMR/hcmr_summary_nontransformedCMR.tsv', 
+                         mean_sd_vars=c(pp, 'bsa, cmrdiabp'),
+                         median_iqr_vars = c('age','bmi',c('wallthkmax',hty,func,fibr)))
+```
 
 # Multivariate Regression Analysis
 
@@ -225,7 +365,7 @@ multivariate_assessor <- function(input_tb, response_var, predictor_vars, covars
 
 ```{r summary_plotter}
 
-summary_plotter <- function(input_tb,output_label, output_path='output/2_CrossPheno_AssocAnalysis/hcmr/summary_plots/', pval='bonferroni',confint=F, se=F,test='t-Test', xlabel='Change in Phenotype per Unit Increase in Predictor'){
+summary_plotter <- function(input_tb,output_label, output_path='OUTPUT/HCMR/crosspheno_assoc/summary_plots/', pval='bonferroni',confint=F, se=F,test='t-Test', xlabel='Change in Phenotype per Unit Increase in Predictor'){
   
   if(length(unique(input_tb$Pheno))>8){
     Palette <- 'Paired'
@@ -349,10 +489,10 @@ fibr_vs_pp_marginal <- map2(fibr_vs_pp_combinations[[1]],fibr_vs_pp_combinations
 rm(fibr_vs_pp_combinations)
 
 #Evaluate separately for LGE_pres due to discrete nature
-lge_pres_vs_pp_combinations <- as.list(expand_grid('lge_pres',pp))
-lge_pres_vs_pp_marginal <- map2(lge_pres_vs_pp_combinations[[1]],lge_pres_vs_pp_combinations[[2]],~multivariate_assessor(transformed_tb,.x,.y,cont_or_discrete_response = 'discrete'))%>% bind_rows()
-fibr_vs_pp_marginal <- bind_rows(fibr_vs_pp_marginal, lge_pres_vs_pp_marginal)
-rm(lge_pres_vs_pp_marginal)
+# lge_pres_vs_pp_combinations <- as.list(expand_grid('lge_pres',pp))
+# lge_pres_vs_pp_marginal <- map2(lge_pres_vs_pp_combinations[[1]],lge_pres_vs_pp_combinations[[2]],~multivariate_assessor(transformed_tb,.x,.y,cont_or_discrete_response = 'discrete'))%>% bind_rows()
+# fibr_vs_pp_marginal <- bind_rows(fibr_vs_pp_marginal, lge_pres_vs_pp_marginal)
+# rm(lge_pres_vs_pp_marginal)
 
 #Functional ~ plasma proteins
 print('Evaluating functional ~ plasma marginally')
@@ -396,7 +536,7 @@ shape_mapping <- c('lvmassi'=17,'wallthkmax'=18,  # Hypertrophy shapes
 all_vs_pp_marginal <- all_vs_pp_marginal %>%
   mutate(p_shape = shape_mapping[Pheno])
 
-write_tsv(all_vs_pp_marginal,'output/2_CrossPheno_AssocAnalysis/hcmr/all_vs_pp_marginal.tsv')
+write_tsv(all_vs_pp_marginal,'OUTPUT/HCMR/crosspheno_assoc/all_vs_pp_marginal.tsv')
 
 ```
 
@@ -410,7 +550,7 @@ summary_plotter(all_vs_pp_marginal,output_label='all_vs_pp_marginal_sarc',pval='
 You can also plot out each individual plot on a per-biomarker basis, keeping the multiple testing correction the same by using the adjusted p-values over their entirety.
 
 ```{r}
-summary_plotter_individualpredictor <- function(input_tb,predictor_of_interest, output_path='output/2_CrossPheno_AssocAnalysis/hcmr/summary_plots/', pval='bonferroni',confint=F, se=F,test='t-Test', xlabel='Change in Phenotype per Unit Increase in Predictor', ylimits='', xlimits=''){
+summary_plotter_individualpredictor <- function(input_tb,predictor_of_interest, output_path='OUTPUT/HCMR/crosspheno_assoc/summary_plots/', pval='bonferroni',confint=F, se=F,test='t-Test', xlabel='Change in Phenotype per Unit Increase in Predictor', ylimits='', xlimits=''){
 
   # if(length(unique(input_tb$Pheno))>8){
   #   Palette <- 'Paired'
@@ -510,7 +650,7 @@ This prepares the .pheno and .covar files for GWAS of HCMR plasma proteins using
 
 ```{r}
 #Import in the total_df_notransform.rds containing phenotype information
-total_df_notransform <- readRDS('output/data/total_notransform_df.rds')
+total_df_notransform <- readRDS('../../EDA_HCMR/output/data/total_notransform_df.rds')
 
 #Import in the 10PCs generated in HCMR only
 eigenvectors <- read_tsv('popgen/2_gwas/data/hcmr/HCMR_HARDCALLS/eigenvectors_hcmr_10pcs') %>%
@@ -630,7 +770,7 @@ summary_plotter(all_vs_dbp_marginal,output_label='all_vs_dbp_marginal_sarcposonl
 #Convert LVEF and NTproBNP and TnTStat back to non-normalised form
 lvef_stratifier_tb <- left_join(select(transformed_tb,-lvef), select(total_df_notransform_prs_rare, HCR_IDs, lvef), by='HCR_IDs')
 
-lvef_stratifier_check <- function(input_tb, pheno_of_interest,lvef_cutoff=50, plot_output_path = 'output/2_CrossPheno_AssocAnalysis/hcmr/misc/', suffix=''){
+lvef_stratifier_check <- function(input_tb, pheno_of_interest,lvef_cutoff=50, plot_output_path = '../../EDA_HCMR/output/2_CrossPheno_AssocAnalysis/hcmr/misc/', suffix=''){
   
   input_tb <- input_tb %>%
     filter(!is.na(lvef)) %>%
