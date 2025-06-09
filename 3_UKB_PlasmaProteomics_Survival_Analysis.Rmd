@@ -90,10 +90,12 @@ if (instance %in% c('1_I0','2_5Y','3_TOTAL')) {
 
 ## Import Outcome Data
 
-This looks at the number of events which occur within the 103 HCM cases who have plasma proteomic data.
+This looks at the number of events which occur within the 100 HCM cases who have plasma proteomic data.
 
 For the plasma proteomic severity analysis, you will have to perform left truncation of events that happen prior to the attendance of assessment centre at instance 0 (i.e when blood samples taken).
 
+
+tss refers to 'time since start' which refers to the approach where I use the start age as the baseline and compute the outcome times as years since the baseline so time since start = timescale, as opposed to using age itself as the timescale.
 ```{r}
 #' Calculate Left-Truncated Composite Outcome Status, Age/Time, and Filter Prevalent Cases
 #'
@@ -216,6 +218,7 @@ add_composite_outcome_filtered <- function(data,
                                       status_col_name,
                                       age_col_name,
                                       baseline_age_col,
+                                      follow_up_time_col_name = 'follow_up_time',
                                       censoring_age_col = "censoring_age",
                                       tss = FALSE, # Use tss consistently
                                       start_age_col = NULL) {
@@ -341,7 +344,16 @@ add_composite_outcome_filtered <- function(data,
           dplyr::mutate("{age_col_name}" := end_age_vector)
   }
 
-  # Step 6: Perform Left Truncation Filtering
+  # Step 6: Calculate Follow-up Time from baseline_age_col
+  # This is the duration from baseline to the event/censoring point used for post-baseline analysis
+  follow_up_duration_vector <- end_age_vector - data_mod[[baseline_age_col]]
+  # Ensure follow-up is not negative (should be handled by pmax in step 4 for final_composite_age_after_baseline)
+  follow_up_duration_vector <- pmax(0, follow_up_duration_vector, na.rm = TRUE) # na.rm should be FALSE if NAs are meaningful
+
+  data_mod <- data_mod %>%
+    dplyr::mutate("{follow_up_time_col_name}" := follow_up_duration_vector)
+  
+  # Step 7: Perform Left Truncation Filtering
   # Keep rows where there was no event ever OR the first true event occurred strictly AFTER baseline age
   data_filtered <- data_mod %>%
       dplyr::filter(is.na(..true_min_event_age..) | ..true_min_event_age.. > .data[[baseline_age_col]])
@@ -350,12 +362,14 @@ add_composite_outcome_filtered <- function(data,
   data_final <- data_filtered %>%
       dplyr::select(-dplyr::all_of(c("..true_min_event_age..", temp_outcome_cols))) # Remove temporary cols
 
+
   # Check if any rows remain after filtering
   if (nrow(data_final) == 0) {
       warning("All rows were removed by left-truncation filtering based on '", baseline_age_col, "'. Returning an empty data frame.", call. = FALSE)
   } else if (nrow(data_final) < nrow(data)) {
        message(nrow(data) - nrow(data_final), " rows removed due to events occurring at or before '", baseline_age_col, "'.")
   }
+  
 
 
   return(data_final)
@@ -429,6 +443,277 @@ ukb_pp_hcm_outcome_tbs <- map(ukb_pp_hcm_outcome_tbs, ~left_join(ukb_pp_hcm_cov2
   dplyr::rename('ID'='eid'))
 names(ukb_pp_hcm_outcome_tbs) <- c('VACOMP','HFCOMP','OVERALLCOMP')
 ```
+```{r}
+#Report the median and IQR for follow-up times
+
+median_iqr_extractor <- function(input_tb){
+  x <- input_tb$follow_up_time
+  x <- x[!is.na(x)] #Remove NA values
+  output <- str_c(signif(median(x),3), signif(quantile(x,0.25),3), signif(quantile(x, 0.75),3), sep = ' ')
+  return(output)
+}
+
+summary_followuptimes <- map(ukb_pp_hcm_outcome_tbs, ~median_iqr_extractor(.)) 
+names(summary_followuptimes) <- c('VACOMP','HFCOMP','OVERALLCOMP')
+
+```
+
+```{r}
+#Report a summary table of the number of event outcomes for each of the composite outcomes
+
+#' Summarize First Post-Baseline Event Components
+#'
+#' Takes the output from `add_composite_outcome_filtered` and summarizes how many
+#' times each specified outcome component was the *first* event contributing to
+#' the composite outcome status.
+#'
+#' @details
+#' This function filters for individuals who experienced a composite event (where
+#' `status_col_name` is 1). It then determines the actual age of this first
+#' post-baseline composite event. Finally, for each outcome component listed in
+#' `outcome_cols`, it counts how many times that component's event age matches
+#' the age of the first post-baseline composite event.
+#'
+#' If `tss = TRUE`, the function reconstructs the absolute age of the composite
+#' event using `age_col_name` (which is time-since-start) and `start_age_col`
+#' before comparing with the ages in `outcome_cols`.
+#'
+#' @param data A dataframe or tibble, typically the output from
+#'   `add_composite_outcome_filtered`.
+#' @param outcome_cols A character vector of the original outcome column names
+#'   (e.g., "arrest_age", "scd_age") that are present in `data`.
+#' @param status_col_name The name of the status column in `data` (string,
+#'   created by `add_composite_outcome_filtered`).
+#' @param age_col_name The name of the composite age/time column in `data` (string,
+#'   created by `add_composite_outcome_filtered`).
+#' @param tss Logical. If `TRUE`, `age_col_name` is treated as time-since-start,
+#'   and `start_age_col` is used to calculate the absolute event age.
+#'   Defaults to `FALSE`.
+#' @param start_age_col Character string. Required and must be a valid column name
+#'   in `data` if `tss = TRUE`. This column contains the start age for
+#'   time-since-start calculations. Defaults to `NULL`.
+#'
+#' @return A tibble with two columns:
+#'   \item{OutcomeComponent}{The names of the outcome components from `outcome_cols`.}
+#'   \item{NumberOfFirstEvents}{The number of times each component was identified
+#'         as the first post-baseline event.}
+#'
+#' @export
+#' @examples
+#' if (require(dplyr) && require(tibble) && require(matrixStats) && require(purrr)) {
+#'   # Define the add_composite_outcome_filtered function (from previous request)
+#'   # [User would need to have the add_composite_outcome_filtered function defined here]
+#'   # For brevity, I'll assume it's defined and use its example output structure.
+#'
+#'   set.seed(123)
+#'   example_df_for_summary <- tibble::tibble(
+#'     id = c(1, 4, 6, 8, 9, 10), # Assuming filtered IDs from previous example
+#'     age_at_assessment = c(45, 59, 65, 68, 70, 71),
+#'     enrollment_age = c(40, 41, 50, 52, 55, 58), # For TSS example
+#'     arrest_age = c(NA, 60, NA, NA, NA, 65), # Note: ID 10 arrest_age=65 is pre-baseline for status
+#'     scd_age = c(50, 62, 68, NA, 72, NA),
+#'     icd_age = c(NA, NA, NA, 71, NA, NA),
+#'     censoring_age = c(75, 61, 72, 78, 75, 77),
+#'     # Output from add_composite_outcome_filtered (Example 1 simplified)
+#'     vacomp_status = c(1, 1, 1, 1, 1, 0), # ID 10 has status 0
+#'     vacomp_age = c(50, 60, 68, 71, 72, 77) # Age for ID 10 is censoring age
+#'   )
+#'   
+#'   va_cols_for_summary <- c("arrest_age", "scd_age", "icd_age")
+#'
+#'   # Example 1: Summarize based on absolute age (tss = FALSE)
+#'   summary_abs <- summarize_event_components(
+#'     data = example_df_for_summary,
+#'     outcome_cols = va_cols_for_summary,
+#'     status_col_name = "vacomp_status",
+#'     age_col_name = "vacomp_age",
+#'     tss = FALSE
+#'   )
+#'   print("Summary of first events (absolute age):")
+#'   print(summary_abs)
+#'   # Expected: arrest_age: 1, scd_age: 3, icd_age: 1
+#'
+#'   # Prepare data similar to TSS output for Example 2
+#'   example_df_for_summary_tss <- tibble::tibble(
+#'     id = c(1, 4, 6, 8, 9, 10),
+#'     age_at_assessment = c(45, 59, 65, 68, 70, 71),
+#'     enrollment_age = c(40, 41, 50, 52, 55, 58),
+#'     arrest_age = c(NA, 60, NA, NA, NA, 65),
+#'     scd_age = c(50, 62, 68, NA, 72, NA),
+#'     icd_age = c(NA, NA, NA, 71, NA, NA),
+#'     censoring_age = c(75, 61, 72, 78, 75, 77),
+#'     vacomp_status_tss = c(1, 1, 1, 1, 1, 0),
+#'     # vacomp_time_since_enroll: event_age - enrollment_age or censoring_age - enrollment_age
+#'     vacomp_time_since_enroll = c(50-40, 60-41, 68-50, 71-52, 72-55, 77-58)
+#'   )
+#'
+#'   # Example 2: Summarize based on time-since-start (tss = TRUE)
+#'   summary_tss <- summarize_event_components(
+#'     data = example_df_for_summary_tss,
+#'     outcome_cols = va_cols_for_summary,
+#'     status_col_name = "vacomp_status_tss",
+#'     age_col_name = "vacomp_time_since_enroll",
+#'     tss = TRUE,
+#'     start_age_col = "enrollment_age"
+#'   )
+#'   print("Summary of first events (time-since-start):")
+#'   print(summary_tss)
+#'   # Expected: arrest_age: 1, scd_age: 3, icd_age: 1
+#' }
+summarize_event_components <- function(data,
+                                     outcome_cols,
+                                     status_col_name,
+                                     age_col_name,
+                                     tss = FALSE,
+                                     start_age_col = NULL) {
+
+  # --- Load Namespace / Input Checks for Packages ---
+  if (!requireNamespace("dplyr", quietly = TRUE)) {
+    stop("Package 'dplyr' must be installed.", call. = FALSE)
+  }
+  if (!requireNamespace("tibble", quietly = TRUE)) {
+    stop("Package 'tibble' must be installed.", call. = FALSE)
+  }
+  if (!requireNamespace("purrr", quietly = TRUE)) {
+    stop("Package 'purrr' must be installed.", call. = FALSE)
+  }
+
+  # --- Basic Input Checks ---
+  if (!is.data.frame(data)) {
+    stop("Input 'data' must be a data frame or tibble.", call. = FALSE)
+  }
+  if (!is.character(outcome_cols) || length(outcome_cols) == 0) {
+    stop("'outcome_cols' must be a non-empty character vector.", call. = FALSE)
+  }
+  if (!all(sapply(outcome_cols, function(col) col %in% names(data)))) {
+    missing_outcome_cols <- outcome_cols[!outcome_cols %in% names(data)]
+    stop("The following 'outcome_cols' are missing from data: ",
+         paste(missing_outcome_cols, collapse = ", "), call. = FALSE)
+  }
+  if (!is.character(status_col_name) || length(status_col_name) != 1 || !nzchar(status_col_name) || !status_col_name %in% names(data)) {
+    stop("'status_col_name' must be a single string representing an existing column in data.", call. = FALSE)
+  }
+  if (!is.character(age_col_name) || length(age_col_name) != 1 || !nzchar(age_col_name) || !age_col_name %in% names(data)) {
+    stop("'age_col_name' must be a single string representing an existing column in data.", call. = FALSE)
+  }
+  if (!is.logical(tss) || length(tss) != 1) {
+    stop("'tss' must be a single logical value (TRUE or FALSE).", call. = FALSE)
+  }
+
+  if (tss) {
+    if (is.null(start_age_col)) {
+      stop("If 'tss' is TRUE, 'start_age_col' must be provided.", call. = FALSE)
+    }
+    if (!is.character(start_age_col) || length(start_age_col) != 1 || !nzchar(start_age_col) || !start_age_col %in% names(data)) {
+      stop("If 'tss' is TRUE, 'start_age_col' must be a single string representing an existing column in data.", call. = FALSE)
+    }
+  }
+
+  # --- Main Logic ---
+
+  # Filter for individuals who experienced a composite event
+  event_data <- data %>%
+    dplyr::filter(.data[[status_col_name]] == 1)
+
+  if (nrow(event_data) == 0) {
+    # Return a tibble with 0 counts if no events occurred
+    summary_table <- tibble::tibble(
+      OutcomeComponent = outcome_cols,
+      NumberOfFirstEvents = 0L # Integer type
+    )
+    message("No individuals with status == 1 found. Returning zero counts.")
+    return(summary_table)
+  }
+
+  # Determine the actual absolute age of the composite event
+  if (tss) {
+    # Check for NAs in start_age_col or age_col_name for event_data, which could lead to NA actual_event_age
+     if(any(is.na(event_data[[start_age_col]]))) {
+        warning("NA values found in '", start_age_col, "' for individuals with an event. This may result in NA actual event ages and affect counts.", call. = FALSE, immediate. = TRUE)
+    }
+    if(any(is.na(event_data[[age_col_name]]))) {
+        warning("NA values found in '", age_col_name, "' for individuals with an event. This may result in NA actual event ages and affect counts.", call. = FALSE, immediate. = TRUE)
+    }
+    event_data <- event_data %>%
+      dplyr::mutate(..actual_event_age.. = .data[[age_col_name]] + .data[[start_age_col]])
+  } else {
+    if(any(is.na(event_data[[age_col_name]]))) {
+        warning("NA values found in '", age_col_name, "' for individuals with an event. This may result in NA actual event ages and affect counts.", call. = FALSE, immediate. = TRUE)
+    }
+    event_data <- event_data %>%
+      dplyr::mutate(..actual_event_age.. = .data[[age_col_name]])
+  }
+  
+  # Filter out rows where ..actual_event_age.. became NA (e.g. due to NA in start_age_col)
+  # as these cannot be meaningfully compared.
+  n_rows_before_na_filter <- nrow(event_data)
+  event_data <- event_data %>% dplyr::filter(!is.na(..actual_event_age..))
+  if (nrow(event_data) < n_rows_before_na_filter) {
+      warning(n_rows_before_na_filter - nrow(event_data), 
+              " rows removed from event data due to NA '..actual_event_age..'.", call. = FALSE, immediate. = TRUE)
+      if (nrow(event_data) == 0) {
+        summary_table <- tibble::tibble(
+            OutcomeComponent = outcome_cols,
+            NumberOfFirstEvents = 0L 
+        )
+        message("No valid actual event ages after handling potential NAs. Returning zero counts.")
+        return(summary_table)
+      }
+  }
+
+
+  # Calculate counts for each outcome component
+  counts <- purrr::map_int(outcome_cols, function(component_col) {
+    # For each component, count rows where component_age == ..actual_event_age..
+    # Ensure component_age is not NA.
+    # dplyr::near is used for robust comparison of numeric (potentially float) ages.
+    sum(
+      !is.na(event_data[[component_col]]) &
+      dplyr::near(event_data[[component_col]], event_data$..actual_event_age..),
+      na.rm = TRUE # Handles cases where near() might return NA if one of its inputs is NA
+                 # (though ..actual_event_age.. should be filtered for NA by now)
+    )
+  })
+
+  summary_table <- tibble::tibble(
+    OutcomeComponent = outcome_cols,
+    NumberOfFirstEvents = counts
+  ) %>%
+    arrange(desc(NumberOfFirstEvents))
+
+  return(summary_table)
+}
+```
+
+```{r}
+ukb_pp_hcm_outcome_summs <- vector('list', 3)
+
+ukb_pp_hcm_outcome_summs[[3]] <- summarize_event_components(
+  data=ukb_pp_hcm_outcome_tbs[[3]],
+  outcome_cols = overall_outcome_cols,
+  status_col_name = "overallcomp_status",
+  age_col_name = "overallcomp_age"
+)
+
+ukb_pp_hcm_outcome_summs[[1]] <- summarize_event_components(
+  data=ukb_pp_hcm_outcome_tbs[[1]],
+  outcome_cols = va_outcome_cols,
+  status_col_name = "vacomp_status",
+  age_col_name = "vacomp_age"
+)
+
+ukb_pp_hcm_outcome_summs[[2]] <- summarize_event_components(
+  data=ukb_pp_hcm_outcome_tbs[[2]],
+  outcome_cols = hf_outcome_cols,
+  status_col_name = "hfcomp_status",
+  age_col_name = "hfcomp_age"
+)
+
+names(ukb_pp_hcm_outcome_summs) <- c('VACOMP','HFCOMP','OVERALLCOMP')
+
+map(ukb_pp_hcm_outcome_summs, ~knitr::kable(.))
+```
+
 
 ## Continuous Variable Binning
 
